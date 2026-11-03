@@ -1922,3 +1922,39 @@ body {
     object-position: center center;
   }
 }
+/* Fix bin percentage visibility on all screen sizes */
+.liquid-gauge-tank {
+  position: relative;
+}
+
+.gauge-center-content {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  width: 100%;
+  text-align: center;
+  pointer-events: none;
+  visibility: visible;
+  opacity: 1;
+}
+
+.gauge-percentage-number,
+.gauge-percentage-symbol,
+.gauge-fill-sub {
+  visibility: visible;
+  opacity: 1;
+}
+
+.gauge-percentage-number {
+  display: inline-block;
+}
+
+.gauge-percentage-symbol {
+  display: inline-block;
+}
+
+.gauge-fill-sub {
+  display: block;
+}
