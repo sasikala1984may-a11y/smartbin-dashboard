@@ -1,10 +1,11 @@
+
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart Waste Monitor | Dual-Compartment IoT Segregation</title>
-  
+
   <!-- PWA & Mobile Meta Tags -->
   <meta name="description" content="Live Bluetooth Low Energy dashboard for dual-compartment smart waste segregation with ESP32">
   <meta name="theme-color" content="#0ea5e9">
@@ -15,7 +16,7 @@
   <link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
 
-  <!-- Google Fonts: Inter & Poppins -->
+  <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
@@ -23,7 +24,28 @@
   <!-- Main Stylesheet -->
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
+
+  <!-- ================= SPLASH SCREEN ================= -->
+  <div id="splash-screen" class="splash-screen"
+       role="status" aria-label="Loading Smart Waste Monitor">
+
+    <picture class="splash-picture">
+      <!-- Portrait image on phones -->
+      <source
+        media="(max-width: 600px)"
+        srcset="splash-mobile.png">
+
+      <!-- Landscape image on laptops and larger screens -->
+      <img
+        src="splash-desktop.png"
+        alt="Smart Waste Monitor"
+        class="splash-image">
+    </picture>
+  </div>
+  <!-- =============== END SPLASH SCREEN =============== -->
+
   <!-- Ambient background lighting blobs -->
   <div class="ambient-glow glow-1" aria-hidden="true"></div>
   <div class="ambient-glow glow-2" aria-hidden="true"></div>
@@ -32,12 +54,15 @@
   <!-- Main Application Wrapper -->
   <div class="app-container">
 
-    <!-- Top Alert Banner (Shown dynamically when any bin is full) -->
-    <aside id="alert-banner" class="alert-banner hidden" role="alert" aria-live="assertive">
+    <!-- Top Alert Banner -->
+    <aside id="alert-banner" class="alert-banner hidden"
+           role="alert" aria-live="assertive">
       <div class="alert-banner-content">
         <div class="alert-icon-wrap" aria-hidden="true">
-          <svg class="alert-icon pulse-fast" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          <svg class="alert-icon pulse-fast" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
           </svg>
         </div>
         <div class="alert-text-group">
@@ -45,50 +70,67 @@
           <p id="alert-message">Compartment capacity reached. Empty immediately to prevent jamming.</p>
         </div>
       </div>
-      <button id="alert-dismiss-btn" class="alert-dismiss" aria-label="Dismiss alert banner">
-        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+      <button id="alert-dismiss-btn" class="alert-dismiss"
+              aria-label="Dismiss alert banner">
+        <svg viewBox="0 0 24 24" width="18" height="18"
+             stroke="currentColor" stroke-width="2" fill="none">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M6 18L18 6M6 6l12 12"/>
         </svg>
       </button>
     </aside>
 
-    <!-- Browser Incompatibility Banner (If Web Bluetooth unavailable) -->
+    <!-- Browser Compatibility Warning -->
     <aside id="browser-warning" class="browser-warning hidden" role="alert">
       <div class="browser-warning-content">
-        <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" fill="none" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="8" x2="12" y2="12" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
+        <svg viewBox="0 0 24 24" width="22" height="22"
+             stroke="currentColor" fill="none" stroke-width="2"
+             aria-hidden="true">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
         <div class="warning-text">
-          <strong>Web Bluetooth Not Supported:</strong> Your current browser cannot communicate directly over BLE. Please use <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> (Desktop / Android). You can still test all functions using <strong>Demo Mode</strong>!
+          <strong>Web Bluetooth Not Supported:</strong>
+          Your current browser cannot communicate directly over BLE.
+          Please use <strong>Google Chrome</strong> or
+          <strong>Microsoft Edge</strong> (Desktop / Android).
+          You can still test all functions using <strong>Demo Mode</strong>!
         </div>
       </div>
-      <button id="enable-demo-from-warning" class="btn btn-sm btn-accent">Activate Demo Mode</button>
+      <button id="enable-demo-from-warning" class="btn btn-sm btn-accent">
+        Activate Demo Mode
+      </button>
     </aside>
 
-    <!-- ==================== HEADER ==================== -->
+    <!-- ================= HEADER ================= -->
     <header class="app-header glass-card">
       <div class="brand-group">
         <div class="brand-logo" aria-hidden="true">
           <svg viewBox="0 0 40 40" width="36" height="36" fill="none">
-            <rect width="40" height="40" rx="10" fill="url(#brandGrad)" />
-            <path d="M10 14h20M14 14l1.5 16h9L26 14M16 11h8" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
-            <path d="M19 19v6M21 19v6" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" />
-            <circle cx="28" cy="12" r="3.5" fill="#38bdf8" />
+            <rect width="40" height="40" rx="10" fill="url(#brandGrad)"/>
+            <path d="M10 14h20M14 14l1.5 16h9L26 14M16 11h8"
+                  stroke="#ffffff" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M19 19v6M21 19v6"
+                  stroke="#ffffff" stroke-width="1.8"
+                  stroke-linecap="round"/>
+            <circle cx="28" cy="12" r="3.5" fill="#38bdf8"/>
             <defs>
               <linearGradient id="brandGrad" x1="0" y1="0" x2="40" y2="40">
-                <stop offset="0%" stop-color="#059669" />
-                <stop offset="100%" stop-color="#0284c7" />
+                <stop offset="0%" stop-color="#059669"/>
+                <stop offset="100%" stop-color="#0284c7"/>
               </linearGradient>
             </defs>
           </svg>
         </div>
+
         <div class="brand-text">
           <h1 class="brand-title">Smart Waste Monitor</h1>
           <div class="brand-subline">
             <span class="status-indicator">
-              <span id="ble-status-dot" class="status-dot dot-disconnected" aria-hidden="true"></span>
+              <span id="ble-status-dot" class="status-dot dot-disconnected"
+                    aria-hidden="true"></span>
               <span id="ble-status-text">Disconnected</span>
             </span>
             <span class="subline-divider">•</span>
@@ -97,39 +139,46 @@
         </div>
       </div>
 
-      <!-- Header Action Controls -->
       <div class="header-actions">
-        <!-- Demo Mode Toggle Button -->
-        <button id="demo-mode-btn" class="btn btn-demo" aria-pressed="false" title="Toggle simulated live telemetry">
-          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+        <button id="demo-mode-btn" class="btn btn-demo"
+                aria-pressed="false" title="Toggle simulated live telemetry">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a6 6 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A6 6 0 009 10.172V5L8 4z"/>
           </svg>
           <span class="btn-label">Demo Mode</span>
           <span class="demo-badge" id="demo-badge">OFF</span>
         </button>
 
-        <!-- Bluetooth Connect/Disconnect Button -->
-        <button id="ble-connect-btn" class="btn btn-connect" title="Connect to ESP32 SmartBin over Web Bluetooth">
-          <svg class="btn-icon ble-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11" />
+        <button id="ble-connect-btn" class="btn btn-connect"
+                title="Connect to ESP32 SmartBin over Web Bluetooth">
+          <svg class="btn-icon ble-icon" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"/>
           </svg>
           <span id="ble-btn-text">Connect Bin</span>
         </button>
 
-        <!-- Theme Toggle Button -->
-        <button id="theme-toggle-btn" class="btn btn-icon-only" aria-label="Toggle light and dark mode" title="Toggle theme">
-          <svg id="theme-moon-icon" class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+        <button id="theme-toggle-btn" class="btn btn-icon-only"
+                aria-label="Toggle light and dark mode" title="Toggle theme">
+          <svg id="theme-moon-icon" class="theme-icon" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
           </svg>
-          <svg id="theme-sun-icon" class="theme-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="5" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          <svg id="theme-sun-icon" class="theme-icon hidden" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
           </svg>
         </button>
       </div>
     </header>
 
-    <!-- Optional Demo Quick-Bar (Shown when Demo Mode is Active) -->
+    <!-- Demo Controls -->
     <div id="demo-control-bar" class="demo-control-bar glass-card hidden">
       <div class="demo-bar-label">
         <span class="pulse-indicator"></span>
@@ -145,17 +194,19 @@
       </div>
     </div>
 
-    <!-- ==================== MAIN DASHBOARD GRID ==================== -->
+    <!-- ================= DASHBOARD GRID ================= -->
     <main class="dashboard-grid">
 
-      <!-- ==================== CARD 1: WET BIN ==================== -->
-      <section class="dashboard-card bin-card wet-card glass-card" aria-labelledby="wet-card-title">
+      <!-- WET BIN -->
+      <section class="dashboard-card bin-card wet-card glass-card"
+               aria-labelledby="wet-card-title">
         <div class="card-header">
           <div class="card-title-group">
             <div class="card-badge-icon wet-icon-glow" aria-hidden="true">
-              <!-- Water droplet icon -->
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z" />
+              <svg viewBox="0 0 24 24" width="22" height="22"
+                   fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/>
               </svg>
             </div>
             <div>
@@ -170,30 +221,20 @@
         </div>
 
         <div class="gauge-and-stats-layout">
-          <!-- Animated Liquid Vertical Fill Gauge -->
           <div class="liquid-gauge-wrapper">
             <div class="liquid-gauge-tank" id="wet-gauge-tank">
-              <!-- Measurement markers on the side -->
               <div class="tank-markers" aria-hidden="true">
-                <span>100%</span>
-                <span>75%</span>
-                <span>50%</span>
-                <span>25%</span>
-                <span>0%</span>
+                <span>100%</span><span>75%</span><span>50%</span>
+                <span>25%</span><span>0%</span>
               </div>
-
-              <!-- Animated Liquid Fill Container -->
-              <div class="liquid-container wet-liquid" id="wet-liquid-fill" style="height: 0%;">
-                <!-- Wave SVG overlay -->
+              <div class="liquid-container wet-liquid" id="wet-liquid-fill"
+                   style="height: 0%;">
                 <div class="wave-shape wave-front" aria-hidden="true"></div>
                 <div class="wave-shape wave-back" aria-hidden="true"></div>
-                <!-- Micro-bubbles inside liquid -->
                 <div class="liquid-bubble b1" aria-hidden="true"></div>
                 <div class="liquid-bubble b2" aria-hidden="true"></div>
                 <div class="liquid-bubble b3" aria-hidden="true"></div>
               </div>
-
-              <!-- Large Center Percentage Readout -->
               <div class="gauge-center-content">
                 <span id="wet-pct-val" class="gauge-percentage-number">0</span>
                 <span class="gauge-percentage-symbol">%</span>
@@ -202,7 +243,6 @@
             </div>
           </div>
 
-          <!-- Metrics readout on the right of gauge -->
           <div class="bin-metrics-panel">
             <div class="metric-block">
               <span class="metric-label">ULTRASONIC DISTANCE</span>
@@ -211,7 +251,8 @@
                 <span id="wet-cm-unit" class="metric-unit">cm</span>
               </div>
               <div class="distance-bar-wrap">
-                <div id="wet-dist-bar" class="distance-bar-fill wet-bar" style="width: 0%;"></div>
+                <div id="wet-dist-bar" class="distance-bar-fill wet-bar"
+                     style="width: 0%;"></div>
               </div>
               <span id="wet-cm-desc" class="metric-subtext">Clearance to lid</span>
             </div>
@@ -220,8 +261,11 @@
               <span class="metric-label">THRESHOLD STATUS</span>
               <div class="threshold-indicator">
                 <div class="threshold-pill" id="wet-threshold-pill">
-                  <svg id="wet-threshold-icon" viewBox="0 0 20 20" width="16" height="16" fill="currentColor">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                  <svg id="wet-threshold-icon" viewBox="0 0 20 20"
+                       width="16" height="16" fill="currentColor">
+                    <path fill-rule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clip-rule="evenodd"/>
                   </svg>
                   <span id="wet-threshold-label">Normal Level (&lt; 90%)</span>
                 </div>
@@ -230,20 +274,23 @@
 
             <div class="metric-block quick-info-box">
               <span class="metric-label">CHUTE SERVO</span>
-              <span id="wet-door-state-indicator" class="door-status-pill door-pill-closed">CLOSED</span>
+              <span id="wet-door-state-indicator"
+                    class="door-status-pill door-pill-closed">CLOSED</span>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- ==================== CARD 2: DRY BIN ==================== -->
-      <section class="dashboard-card bin-card dry-card glass-card" aria-labelledby="dry-card-title">
+      <!-- DRY BIN -->
+      <section class="dashboard-card bin-card dry-card glass-card"
+               aria-labelledby="dry-card-title">
         <div class="card-header">
           <div class="card-title-group">
             <div class="card-badge-icon dry-icon-glow" aria-hidden="true">
-              <!-- Recycle / inorganic box icon -->
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <svg viewBox="0 0 24 24" width="22" height="22"
+                   fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
               </svg>
             </div>
             <div>
@@ -258,30 +305,20 @@
         </div>
 
         <div class="gauge-and-stats-layout">
-          <!-- Animated Liquid Vertical Fill Gauge (Dry theme) -->
           <div class="liquid-gauge-wrapper">
             <div class="liquid-gauge-tank" id="dry-gauge-tank">
-              <!-- Measurement markers on the side -->
               <div class="tank-markers" aria-hidden="true">
-                <span>100%</span>
-                <span>75%</span>
-                <span>50%</span>
-                <span>25%</span>
-                <span>0%</span>
+                <span>100%</span><span>75%</span><span>50%</span>
+                <span>25%</span><span>0%</span>
               </div>
-
-              <!-- Animated Liquid Fill Container -->
-              <div class="liquid-container dry-liquid" id="dry-liquid-fill" style="height: 0%;">
-                <!-- Wave SVG overlay -->
+              <div class="liquid-container dry-liquid" id="dry-liquid-fill"
+                   style="height: 0%;">
                 <div class="wave-shape wave-front" aria-hidden="true"></div>
                 <div class="wave-shape wave-back" aria-hidden="true"></div>
-                <!-- Micro-bubbles inside dry liquid -->
                 <div class="liquid-bubble b1" aria-hidden="true"></div>
                 <div class="liquid-bubble b2" aria-hidden="true"></div>
                 <div class="liquid-bubble b3" aria-hidden="true"></div>
               </div>
-
-              <!-- Large Center Percentage Readout -->
               <div class="gauge-center-content">
                 <span id="dry-pct-val" class="gauge-percentage-number">0</span>
                 <span class="gauge-percentage-symbol">%</span>
@@ -290,7 +327,6 @@
             </div>
           </div>
 
-          <!-- Metrics readout on the right of gauge -->
           <div class="bin-metrics-panel">
             <div class="metric-block">
               <span class="metric-label">ULTRASONIC DISTANCE</span>
@@ -299,7 +335,8 @@
                 <span id="dry-cm-unit" class="metric-unit">cm</span>
               </div>
               <div class="distance-bar-wrap">
-                <div id="dry-dist-bar" class="distance-bar-fill dry-bar" style="width: 0%;"></div>
+                <div id="dry-dist-bar" class="distance-bar-fill dry-bar"
+                     style="width: 0%;"></div>
               </div>
               <span id="dry-cm-desc" class="metric-subtext">Clearance to lid</span>
             </div>
@@ -308,8 +345,11 @@
               <span class="metric-label">THRESHOLD STATUS</span>
               <div class="threshold-indicator">
                 <div class="threshold-pill" id="dry-threshold-pill">
-                  <svg id="dry-threshold-icon" viewBox="0 0 20 20" width="16" height="16" fill="currentColor">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                  <svg id="dry-threshold-icon" viewBox="0 0 20 20"
+                       width="16" height="16" fill="currentColor">
+                    <path fill-rule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clip-rule="evenodd"/>
                   </svg>
                   <span id="dry-threshold-label">Normal Level (&lt; 90%)</span>
                 </div>
@@ -318,22 +358,27 @@
 
             <div class="metric-block quick-info-box">
               <span class="metric-label">CHUTE SERVO</span>
-              <span id="dry-door-state-indicator" class="door-status-pill door-pill-closed">CLOSED</span>
+              <span id="dry-door-state-indicator"
+                    class="door-status-pill door-pill-closed">CLOSED</span>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- ==================== CARD 3: BUZZER CARD ==================== -->
-      <section class="dashboard-card buzzer-card glass-card" aria-labelledby="buzzer-card-title">
+      <!-- BUZZER -->
+      <section class="dashboard-card buzzer-card glass-card"
+               aria-labelledby="buzzer-card-title">
         <div class="card-header">
           <div class="card-title-group">
             <div class="card-badge-icon buzzer-badge-icon" aria-hidden="true">
-              <!-- Speaker Bell Icon -->
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M11 5L6 9H2v6h4l5 4V5z" />
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15.54 8.46a5 5 0 010 7.07" />
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19.07 4.93a10 10 0 010 14.14" />
+              <svg viewBox="0 0 24 24" width="22" height="22"
+                   fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M11 5L6 9H2v6h4l5 4V5z"/>
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M15.54 8.46a5 5 0 010 7.07"/>
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M19.07 4.93a10 10 0 010 14.14"/>
               </svg>
             </div>
             <div>
@@ -348,25 +393,24 @@
         </div>
 
         <div class="buzzer-content-layout">
-          <!-- Animated Visual Speaker & Radiating Sound Waves -->
           <div class="buzzer-visual-wrapper">
             <div class="buzzer-circle-container" id="buzzer-visual-circle">
-              <!-- Radiating Soundwaves (animated when buzzer === true) -->
               <span class="soundwave wave-1" aria-hidden="true"></span>
               <span class="soundwave wave-2" aria-hidden="true"></span>
               <span class="soundwave wave-3" aria-hidden="true"></span>
-              
-              <!-- Center Speaker SVG -->
               <div class="buzzer-speaker-icon" id="buzzer-speaker-icon">
-                <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M11 5L6 9H2v6h4l5 4V5z" />
-                  <path class="speaker-arc arc-1" stroke-linecap="round" stroke-linejoin="round" d="M15.54 8.46a5 5 0 010 7.07" />
-                  <path class="speaker-arc arc-2" stroke-linecap="round" stroke-linejoin="round" d="M19.07 4.93a10 10 0 010 14.14" />
+                <svg viewBox="0 0 24 24" width="48" height="48"
+                     fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M11 5L6 9H2v6h4l5 4V5z"/>
+                  <path class="speaker-arc arc-1" stroke-linecap="round"
+                        stroke-linejoin="round" d="M15.54 8.46a5 5 0 010 7.07"/>
+                  <path class="speaker-arc arc-2" stroke-linecap="round"
+                        stroke-linejoin="round" d="M19.07 4.93a10 10 0 010 14.14"/>
                 </svg>
               </div>
             </div>
           </div>
-
           <div class="buzzer-info-group">
             <div class="buzzer-state-headline" id="buzzer-state-headline">Buzzer Standby</div>
             <p class="buzzer-explanation" id="buzzer-explanation">
@@ -376,19 +420,21 @@
         </div>
       </section>
 
-      <!-- ==================== CARD 4: LAST ITEM & CHUTE STATUS ==================== -->
-      <section class="dashboard-card item-card glass-card" aria-labelledby="item-card-title">
+      <!-- CLASSIFICATION AND CHUTE -->
+      <section class="dashboard-card item-card glass-card"
+               aria-labelledby="item-card-title">
         <div class="card-header">
           <div class="card-title-group">
             <div class="card-badge-icon item-badge-icon" aria-hidden="true">
-              <!-- Moisture probe / sensor icon -->
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              <svg viewBox="0 0 24 24" width="22" height="22"
+                   fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M13 10V3L4 14h7v7l9-11h-7z"/>
               </svg>
             </div>
             <div>
-              <h2 id="item-card-title" class="card-title">CLASSIFICATION & CHUTE</h2>
-              <span class="card-category-desc">Moisture Probe & Servo Doors</span>
+              <h2 id="item-card-title" class="card-title">CLASSIFICATION &amp; CHUTE</h2>
+              <span class="card-category-desc">Moisture Probe &amp; Servo Doors</span>
             </div>
           </div>
           <div id="item-classification-badge" class="status-badge badge-neutral">
@@ -398,12 +444,13 @@
         </div>
 
         <div class="item-card-layout">
-          <!-- Moisture Classification Block -->
           <div class="item-classification-block">
             <div class="moist-result-hero" id="moist-result-box">
               <div class="moist-icon-frame" id="moist-hero-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z" />
+                <svg viewBox="0 0 24 24" width="32" height="32"
+                     fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/>
                 </svg>
               </div>
               <div class="moist-hero-details">
@@ -412,7 +459,6 @@
               </div>
             </div>
 
-            <!-- ADC Moisture Meter -->
             <div class="adc-meter-group">
               <div class="adc-meter-labels">
                 <span class="adc-label-title">ANALOG MOISTURE SENSOR</span>
@@ -422,7 +468,6 @@
                 <div class="adc-zone zone-dry" title="Dry Zone (< 1500)">DRY</div>
                 <div class="adc-zone zone-unknown" title="Ambiguous Zone (1500-2500)">AMBIGUOUS</div>
                 <div class="adc-zone zone-wet" title="Wet Zone (> 2500)">WET</div>
-                <!-- Needle cursor showing raw value -->
                 <div class="adc-needle" id="adc-needle-indicator" style="left: 0%;"></div>
               </div>
               <div class="adc-scale-extremes">
@@ -433,13 +478,9 @@
             </div>
           </div>
 
-          <!-- Animated Door Graphic & Open State -->
           <div class="door-graphic-block">
             <span class="metric-label">PHYSICAL CHUTE DOORS</span>
-            
-            <!-- Graphic showing dual flap doors -->
             <div class="dual-door-visual" id="dual-door-visual">
-              <!-- Left Door: Wet Compartment Chute -->
               <div class="door-compartment" id="door-comp-wet">
                 <div class="door-lid" id="door-lid-wet">
                   <span class="door-lid-handle"></span>
@@ -451,10 +492,8 @@
                 </div>
               </div>
 
-              <!-- Center Separator -->
               <div class="door-partition"></div>
 
-              <!-- Right Door: Dry Compartment Chute -->
               <div class="door-compartment" id="door-comp-dry">
                 <div class="door-lid" id="door-lid-dry">
                   <span class="door-lid-handle"></span>
@@ -469,7 +508,9 @@
 
             <div class="door-status-summary" id="door-overall-summary">
               <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor">
-                <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+                <path fill-rule="evenodd"
+                      d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+                      clip-rule="evenodd"/>
               </svg>
               <span id="door-summary-text">Both intake doors are securely closed</span>
             </div>
@@ -477,14 +518,16 @@
         </div>
       </section>
 
-      <!-- ==================== CARD 5: MANUAL DOOR CONTROLS ==================== -->
-      <section class="dashboard-card controls-card glass-card" aria-labelledby="controls-card-title">
+      <!-- MANUAL CONTROLS -->
+      <section class="dashboard-card controls-card glass-card"
+               aria-labelledby="controls-card-title">
         <div class="card-header">
           <div class="card-title-group">
             <div class="card-badge-icon controls-badge-icon" aria-hidden="true">
-              <!-- Sliders / joystick icon -->
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              <svg viewBox="0 0 24 24" width="22" height="22"
+                   fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
               </svg>
             </div>
             <div>
@@ -496,30 +539,34 @@
         </div>
 
         <div class="manual-buttons-grid">
-          <!-- Button 1: Open Wet Door -->
-          <button id="btn-open-wet" class="btn btn-chute btn-chute-wet" title="Send 'W' command to ESP32 to open Wet Door">
+          <button id="btn-open-wet" class="btn btn-chute btn-chute-wet"
+                  title="Send 'W' command to ESP32 to open Wet Door">
             <div class="chute-btn-icon-wrap" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z" />
+              <svg viewBox="0 0 24 24" width="24" height="24"
+                   fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/>
               </svg>
             </div>
             <div class="chute-btn-text">
               <strong class="btn-main-label">Open Wet Door</strong>
-              <span class="btn-sub-label">Sends BLE Command &quot;W&quot;</span>
+              <span class="btn-sub-label">Sends BLE Command "W"</span>
             </div>
             <kbd class="key-badge">W</kbd>
           </button>
 
-          <!-- Button 2: Open Dry Door -->
-          <button id="btn-open-dry" class="btn btn-chute btn-chute-dry" title="Send 'D' command to ESP32 to open Dry Door">
+          <button id="btn-open-dry" class="btn btn-chute btn-chute-dry"
+                  title="Send 'D' command to ESP32 to open Dry Door">
             <div class="chute-btn-icon-wrap" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <svg viewBox="0 0 24 24" width="24" height="24"
+                   fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
               </svg>
             </div>
             <div class="chute-btn-text">
               <strong class="btn-main-label">Open Dry Door</strong>
-              <span class="btn-sub-label">Sends BLE Command &quot;D&quot;</span>
+              <span class="btn-sub-label">Sends BLE Command "D"</span>
             </div>
             <kbd class="key-badge">D</kbd>
           </button>
@@ -527,21 +574,24 @@
 
         <div class="command-status-bar" id="command-feedback-bar">
           <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor">
-            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+            <path fill-rule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0v2a1 1 0 012 0zm-2 5a1 1 0 100 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                  clip-rule="evenodd"/>
           </svg>
           <span id="command-feedback-text">Ready to dispatch door commands to ESP32 servo controller.</span>
         </div>
       </section>
 
-      <!-- ==================== CARD 6: EVENT HISTORY ==================== -->
-      <section class="dashboard-card history-card glass-card" aria-labelledby="history-card-title">
+      <!-- EVENT HISTORY -->
+      <section class="dashboard-card history-card glass-card"
+               aria-labelledby="history-card-title">
         <div class="card-header">
           <div class="card-title-group">
             <div class="card-badge-icon history-badge-icon" aria-hidden="true">
-              <!-- History clock icon -->
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
+              <svg viewBox="0 0 24 24" width="22" height="22"
+                   fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
               </svg>
             </div>
             <div>
@@ -549,9 +599,13 @@
               <span class="card-category-desc">Last 10 Activities (Saved to localStorage)</span>
             </div>
           </div>
-          <button id="clear-history-btn" class="btn btn-xs btn-outline" title="Clear recorded event history">
-            <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor" aria-hidden="true">
-              <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+          <button id="clear-history-btn" class="btn btn-xs btn-outline"
+                  title="Clear recorded event history">
+            <svg viewBox="0 0 20 20" width="14" height="14"
+                 fill="currentColor" aria-hidden="true">
+              <path fill-rule="evenodd"
+                    d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                    clip-rule="evenodd"/>
             </svg>
             <span>Clear Log</span>
           </button>
@@ -559,20 +613,20 @@
 
         <div class="history-list-wrapper">
           <ul id="history-list" class="history-list" role="log" aria-live="polite">
-            <!-- Populated dynamically via JS -->
             <li class="history-empty">
-              <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" fill="none" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              <svg viewBox="0 0 24 24" width="32" height="32"
+                   stroke="currentColor" fill="none" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
               </svg>
               <span>No recorded events yet. Connect your SmartBin or toggle Demo Mode!</span>
             </li>
           </ul>
         </div>
       </section>
-
     </main>
 
-    <!-- ==================== FOOTER ==================== -->
+    <!-- FOOTER -->
     <footer class="app-footer">
       <div class="footer-content">
         <p><strong>Smart Waste Monitor</strong> • BLE Nordic UART Service (UUID: <code>6e400001-b5a3-f393-e0a9-e50e24dcca9e</code>)</p>
@@ -581,10 +635,28 @@
     </footer>
   </div>
 
-  <!-- Toast Notification Container for Quick Alerts -->
-  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <!-- Toast Notifications -->
+  <div id="toast-container" class="toast-container"
+       aria-live="polite" aria-atomic="true"></div>
 
   <!-- Main JavaScript Application -->
   <script src="app.js"></script>
+
+  <!-- Splash Screen Timer -->
+  <script>
+    (() => {
+      const splash = document.getElementById("splash-screen");
+      if (!splash) return;
+
+      window.setTimeout(() => {
+        splash.classList.add("splash-hidden");
+
+        window.setTimeout(() => {
+          splash.remove();
+        }, 750);
+      }, 3000);
+    })();
+  </script>
+
 </body>
 </html>
