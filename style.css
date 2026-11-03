@@ -1856,7 +1856,7 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  background: #000000;
+  background: #000;
   z-index: 99999;
 
   display: flex;
@@ -1870,16 +1870,24 @@ body {
 
 #splash-screen .splash-picture {
   display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 #splash-screen .splash-image {
   display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  max-width: none;
+  max-height: none;
   object-fit: cover;
-  object-position: center;
+  object-position: center center;
 }
 
 /* Hide extra splash text, if present */
@@ -1895,12 +1903,22 @@ body {
   pointer-events: none;
 }
 
-/* Phone splash image */
+/* Mobile screens */
 @media (max-width: 600px) {
+  #splash-screen {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  #splash-screen .splash-picture,
   #splash-screen .splash-image {
     width: 100%;
     height: 100%;
+  }
+
+  #splash-screen .splash-image {
     object-fit: cover;
-    object-position: center;
+    object-position: center center;
   }
 }
