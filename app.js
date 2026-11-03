@@ -10,12 +10,13 @@
 
 const BLE_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const BLE_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
-const BLE_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const BLE_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e";
 
 const FULL_THRESHOLD = 90;
 const MAX_HISTORY = 10;
 const STORAGE_KEY = "smartWasteMonitorHistory";
 const THEME_KEY = "smartWasteMonitorTheme";
+const BIN_HEIGHT_CM = 18;
 
 /* ---------------- APPLICATION STATE ---------------- */
 
@@ -34,6 +35,9 @@ const state = {
 
   history: [],
   demoTimer: null,
+
+  // NEW: Buffer for fragmented BLE notifications.
+  bleBuffer: "",
 
   demo: {
     wetDistance: 15,
@@ -325,18 +329,13 @@ function updateLastUpdate() {
 /* ---------------- BIN CAPACITY CALCULATIONS ---------------- */
 
 /*
-  The ESP32 may send:
-  - distance in centimetres
-  - percentage filled
-  - a full/not-full status
+  Supported bin fields:
+  distance, cm, dist
+  percent, pct, percentage, fill
 
-  If percentage is not supplied, capacity is calculated using
-  distance and a default bin height of 18 cm.
-
-  Change BIN_HEIGHT_CM if your actual bin height differs.
+  Percentage is calculated from the distance when the
+  ESP32 does not provide a fill percentage.
 */
-
-const BIN_HEIGHT_CM = 18;
 
 function normalizeBin(bin) {
   if (!bin || typeof bin !== "object") {
@@ -353,16 +352,19 @@ function normalizeBin(bin) {
     -1
   );
 
-  const hasPercent =
-    bin.percent !== undefined ||
-    bin.percentage !== undefined ||
-    bin.fill !== undefined;
+  // FIX: Recognize "pct", which your ESP32 actually sends.
+  const hasPercent = [
+    "percent",
+    "pct",
+    "percentage",
+    "fill"
+  ].some((key) => bin[key] !== undefined && bin[key] !== null);
 
   let percent;
 
   if (hasPercent) {
     percent = safeNumber(
-      bin.percent ?? bin.percentage ?? bin.fill,
+      bin.percent ?? bin.pct ?? bin.percentage ?? bin.fill,
       0
     );
   } else if (distance >= 0) {
@@ -482,11 +484,6 @@ function updateAlertBanner(wet, dry, previousData) {
     return;
   }
 
-  /*
-    Reopen the alert if a compartment has newly become full.
-    previousData must be captured before state.lastData changes.
-  */
-
   const previousWetFull = Boolean(
     previousData && previousData.wet && previousData.wet.full
   );
@@ -563,8 +560,17 @@ function updateBuzzer(data) {
 /* ---------------- CLASSIFICATION ---------------- */
 
 function updateClassification(data) {
+  // FIX: ESP32 sends moisture as { raw: 4095, cls: "UNKNOWN" }.
+  const moistureData =
+    data.moisture && typeof data.moisture === "object"
+      ? data.moisture
+      : {};
+
   const raw = safeNumber(
-    data.moisture ?? data.adc ?? data.moistureRaw,
+    moistureData.raw ??
+    data.moistureRaw ??
+    data.adc ??
+    (typeof data.moisture === "number" ? data.moisture : undefined),
     -1
   );
 
@@ -594,8 +600,12 @@ function updateClassification(data) {
     }
   }
 
-  if (data.classification) {
-    const value = String(data.classification).toUpperCase();
+  // Use the ESP32 classification when available.
+  const espClassification =
+    moistureData.cls ?? data.classification;
+
+  if (espClassification) {
+    const value = String(espClassification).toUpperCase();
 
     if (["WET", "DRY", "UNKNOWN"].includes(value)) {
       classification = value;
@@ -603,6 +613,16 @@ function updateClassification(data) {
   }
 
   setText(DOM.classification.classDisplay, classification);
+
+  // Keep the note consistent with the displayed classification.
+  if (classification === "WET") {
+    note = "High moisture detected. Wet waste classification.";
+  } else if (classification === "DRY") {
+    note = "Low moisture detected. Dry waste classification.";
+  } else if (classification === "UNKNOWN") {
+    note = "Ambiguous moisture level. Check the item or sensor.";
+  }
+
   setText(DOM.classification.note, note);
 
   setText(
@@ -681,11 +701,6 @@ function updateDoors(data) {
 function updateDashboard(rawData) {
   if (!rawData || typeof rawData !== "object") return;
 
-  /*
-    Save the previous data BEFORE replacing state.lastData.
-    This is important for detecting newly-full bins.
-  */
-
   const previousData = state.lastData;
 
   const wet = normalizeBin(rawData.wet);
@@ -713,27 +728,68 @@ function updateDashboard(rawData) {
 /* ---------------- BLE DATA PARSING ---------------- */
 
 /*
-  Recommended ESP32 JSON format:
+  FIX: BLE notifications may split one JSON message across
+  several notifications.
 
-  {
-    "wet": {
-      "distance": 12.5,
-      "percent": 30,
-      "full": false
-    },
-    "dry": {
-      "distance": 5,
-      "percent": 90,
-      "full": true
-    },
-    "moisture": 1200,
-    "buzzer": true,
-    "wetDoorOpen": false,
-    "dryDoorOpen": false
+  This buffer collects fragments and extracts complete JSON
+  objects before parsing them.
+
+  Supports nested JSON objects and braces inside quoted strings.
+*/
+
+function extractCompleteJSON(buffer) {
+  const messages = [];
+
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < buffer.length; i++) {
+    const character = buffer[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (character === "{") {
+      if (depth === 0) {
+        start = i;
+      }
+
+      depth++;
+    } else if (character === "}") {
+      if (depth > 0) {
+        depth--;
+
+        if (depth === 0 && start !== -1) {
+          messages.push(buffer.slice(start, i + 1));
+          start = -1;
+        }
+      }
+    }
   }
 
-  The parser also accepts simple key/value text lines.
-*/
+  // Keep the incomplete JSON object for the next notification.
+  const remainder = depth > 0 && start !== -1
+    ? buffer.slice(start)
+    : "";
+
+  return { messages, remainder };
+}
 
 function parseTelemetry(message) {
   const textMessage = message.trim();
@@ -747,7 +803,7 @@ function parseTelemetry(message) {
       return json;
     }
   } catch (_) {
-    // Not JSON. Try key/value parsing below.
+    // Try key/value parsing below.
   }
 
   const result = {};
@@ -788,8 +844,13 @@ function parseTelemetry(message) {
     return undefined;
   }
 
-  const wetDistance = getNumber("wetdistance", "wet_distance", "wetcm", "wet");
-  const dryDistance = getNumber("drydistance", "dry_distance", "drycm", "dry");
+  const wetDistance = getNumber(
+    "wetdistance", "wet_distance", "wetcm", "wet_cm", "wet"
+  );
+
+  const dryDistance = getNumber(
+    "drydistance", "dry_distance", "drycm", "dry_cm", "dry"
+  );
 
   if (wetDistance !== undefined) {
     result.wet = { distance: wetDistance };
@@ -799,8 +860,8 @@ function parseTelemetry(message) {
     result.dry = { distance: dryDistance };
   }
 
-  const wetPercent = getNumber("wetpercent", "wet_percent");
-  const dryPercent = getNumber("drypercent", "dry_percent");
+  const wetPercent = getNumber("wetpercent", "wet_percent", "wetpct");
+  const dryPercent = getNumber("drypercent", "dry_percent", "drypct");
 
   if (wetPercent !== undefined) {
     result.wet = { ...(result.wet || {}), percent: wetPercent };
@@ -849,14 +910,51 @@ function parseTelemetry(message) {
 
 function handleBLENotification(event) {
   const value = event.target.value;
+  const fragment = new TextDecoder().decode(value);
 
-  const message = new TextDecoder().decode(value);
-  const data = parseTelemetry(message);
+  if (!fragment) return;
 
-  if (data) {
-    updateDashboard(data);
-  } else {
-    console.warn("Could not parse ESP32 telemetry:", message);
+  // Append this notification to any unfinished previous message.
+  state.bleBuffer += fragment;
+
+  // Avoid an unbounded buffer if the ESP32 sends malformed data.
+  if (state.bleBuffer.length > 16384) {
+    console.warn("BLE receive buffer reset: message too large.");
+    state.bleBuffer = fragment;
+  }
+
+  const extracted = extractCompleteJSON(state.bleBuffer);
+
+  // Preserve incomplete JSON for the next BLE notification.
+  state.bleBuffer = extracted.remainder;
+
+  for (const message of extracted.messages) {
+    const data = parseTelemetry(message);
+
+    if (data) {
+      updateDashboard(data);
+    } else {
+      console.warn("Could not parse complete ESP32 telemetry:", message);
+    }
+  }
+
+  // Also support newline-delimited non-JSON telemetry.
+  // Only process it when there is no unfinished JSON object.
+  if (
+    state.bleBuffer &&
+    !state.bleBuffer.includes("{") &&
+    /[\r\n]/.test(state.bleBuffer)
+  ) {
+    const lines = state.bleBuffer.split(/[\r\n]+/);
+    state.bleBuffer = lines.pop() || "";
+
+    for (const line of lines) {
+      const data = parseTelemetry(line);
+
+      if (data) {
+        updateDashboard(data);
+      }
+    }
   }
 }
 
@@ -892,6 +990,8 @@ async function connectBLE() {
 
     updateConnectionStatus(false, "Connecting...");
 
+    state.bleBuffer = "";
+
     state.server = await state.device.gatt.connect();
 
     state.service = await state.server.getPrimaryService(
@@ -914,7 +1014,10 @@ async function connectBLE() {
     );
 
     updateConnectionStatus(true, "Connected");
-    addHistory(`Connected to ${state.device.name || "ESP32 SmartBin"}`, "success");
+    addHistory(
+      `Connected to ${state.device.name || "ESP32 SmartBin"}`,
+      "success"
+    );
     showToast("Connected to SmartBin successfully.", "success");
 
   } catch (error) {
@@ -931,6 +1034,7 @@ async function connectBLE() {
 
 function handleBLEDisconnect() {
   state.connected = false;
+  state.bleBuffer = "";
 
   if (state.txCharacteristic) {
     state.txCharacteristic.removeEventListener(
@@ -969,11 +1073,11 @@ async function sendBLECommand(command) {
     return;
   }
 
-  if (
-    !state.connected ||
-    !state.rxCharacteristic
-  ) {
-    showToast("Connect to the ESP32 first, or activate Demo Mode.", "warning");
+  if (!state.connected || !state.rxCharacteristic) {
+    showToast(
+      "Connect to the ESP32 first, or activate Demo Mode.",
+      "warning"
+    );
     setText(DOM.commandFeedback, "Not connected. Command was not sent.");
     return;
   }
@@ -981,7 +1085,9 @@ async function sendBLECommand(command) {
   try {
     const bytes = new TextEncoder().encode(command);
 
-    if (typeof state.rxCharacteristic.writeValueWithResponse === "function") {
+    if (
+      typeof state.rxCharacteristic.writeValueWithResponse === "function"
+    ) {
       await state.rxCharacteristic.writeValueWithResponse(bytes);
     } else {
       await state.rxCharacteristic.writeValue(bytes);
@@ -1026,7 +1132,9 @@ function createDemoData() {
         : state.demo.sensorError
           ? 0
           : clamp(
-              Math.round(((BIN_HEIGHT_CM - wetDistance) / BIN_HEIGHT_CM) * 100),
+              Math.round(
+                ((BIN_HEIGHT_CM - wetDistance) / BIN_HEIGHT_CM) * 100
+              ),
               0,
               100
             ),
@@ -1040,7 +1148,9 @@ function createDemoData() {
         : state.demo.sensorError
           ? 0
           : clamp(
-              Math.round(((BIN_HEIGHT_CM - dryDistance) / BIN_HEIGHT_CM) * 100),
+              Math.round(
+                ((BIN_HEIGHT_CM - dryDistance) / BIN_HEIGHT_CM) * 100
+              ),
               0,
               100
             ),
@@ -1078,6 +1188,10 @@ function startDemoMode() {
   setHidden(DOM.browserWarning, true);
 
   updateDashboard(createDemoData());
+
+  if (state.demoTimer) {
+    window.clearInterval(state.demoTimer);
+  }
 
   state.demoTimer = window.setInterval(() => {
     if (!state.demo.sensorError) {
@@ -1169,12 +1283,7 @@ function handleDemoCommand(command) {
 function toggleWetFull() {
   state.demo.wetFull = !state.demo.wetFull;
 
-  if (state.demo.wetFull) {
-    state.demo.wetDistance = 1;
-  } else {
-    state.demo.wetDistance = 15;
-  }
-
+  state.demo.wetDistance = state.demo.wetFull ? 1 : 15;
   state.demo.sensorError = false;
 
   updateDashboard(createDemoData());
@@ -1188,12 +1297,7 @@ function toggleWetFull() {
 function toggleDryFull() {
   state.demo.dryFull = !state.demo.dryFull;
 
-  if (state.demo.dryFull) {
-    state.demo.dryDistance = 1;
-  } else {
-    state.demo.dryDistance = 15;
-  }
-
+  state.demo.dryDistance = state.demo.dryFull ? 1 : 15;
   state.demo.sensorError = false;
 
   updateDashboard(createDemoData());
