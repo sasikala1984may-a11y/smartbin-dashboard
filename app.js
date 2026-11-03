@@ -1,1289 +1,1398 @@
-/**
- * Smart Waste Monitor - Main Application Logic
- * ESP32 BLE + Dual Bin Dashboard + Demo Mode + Event History
- */
 
-// ============================================================================
-// 1. CONFIGURATION
-// ============================================================================
+"use strict";
 
-const NORDIC_UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-const NORDIC_UART_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
-const NORDIC_UART_RX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
-const BLE_DEVICE_NAME_PREFIX = 'SmartBin';
+/* =========================================================
+   SMART WASTE MONITOR
+   ESP32 + Web Bluetooth + Demo Mode
+   ========================================================= */
 
-const MAX_HISTORY_ITEMS = 10;
-const STORAGE_KEY_HISTORY = 'smartbin_history';
-const STORAGE_KEY_THEME = 'smartbin_theme';
+/* ---------------- CONFIGURATION ---------------- */
 
-// ============================================================================
-// 2. APPLICATION STATE
-// ============================================================================
+const BLE_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const BLE_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const BLE_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+const FULL_THRESHOLD = 90;
+const MAX_HISTORY = 10;
+const STORAGE_KEY = "smartWasteMonitorHistory";
+const THEME_KEY = "smartWasteMonitorTheme";
+
+/* ---------------- APPLICATION STATE ---------------- */
 
 const state = {
   device: null,
   server: null,
+  service: null,
   txCharacteristic: null,
   rxCharacteristic: null,
 
-  isConnected: false,
-  isConnecting: false,
-  manualDisconnect: false,
-
-  reconnectAttempts: 0,
-  maxReconnectAttempts: 3,
-  reconnectTimeoutId: null,
-
-  bleBuffer: '',
-
-  isDemoMode: false,
-  demoIntervalId: null,
-  demoDoorTimerId: null,
-
-  demoData: {
-    wet: { cm: 8.5, pct: 45, full: false },
-    dry: { cm: 12.0, pct: 30, full: false },
-    buzzer: false,
-    moist: { raw: 850, cls: 'DRY' },
-    door: 'CLOSED'
-  },
+  connected: false,
+  demoMode: false,
 
   lastData: null,
-  lastUpdateTime: null,
-  relativeTimeInterval: null,
+  alertDismissed: false,
 
-  alertDismissed: false
+  history: [],
+  demoTimer: null,
+
+  demo: {
+    wetDistance: 15,
+    dryDistance: 15,
+    moisture: 1000,
+    wetFull: false,
+    dryFull: false,
+    wetDoorOpen: false,
+    dryDoorOpen: false,
+    sensorError: false
+  }
 };
 
-// ============================================================================
-// 3. DOM ELEMENT REFERENCES
-// ============================================================================
+/* ---------------- DOM ELEMENTS ---------------- */
+
+const $ = (id) => document.getElementById(id);
 
 const DOM = {
-  alertBanner: document.getElementById('alert-banner'),
-  alertTitle: document.getElementById('alert-title'),
-  alertMessage: document.getElementById('alert-message'),
-  alertDismissBtn: document.getElementById('alert-dismiss-btn'),
-  browserWarning: document.getElementById('browser-warning'),
-  enableDemoFromWarning: document.getElementById('enable-demo-from-warning'),
+  splash: $("splash-screen"),
 
-  bleStatusDot: document.getElementById('ble-status-dot'),
-  bleStatusText: document.getElementById('ble-status-text'),
-  lastUpdateText: document.getElementById('last-update-text'),
-  bleConnectBtn: document.getElementById('ble-connect-btn'),
-  bleBtnText: document.getElementById('ble-btn-text'),
-  demoModeBtn: document.getElementById('demo-mode-btn'),
-  demoBadge: document.getElementById('demo-badge'),
-  demoControlBar: document.getElementById('demo-control-bar'),
-  themeToggleBtn: document.getElementById('theme-toggle-btn'),
-  themeMoonIcon: document.getElementById('theme-moon-icon'),
-  themeSunIcon: document.getElementById('theme-sun-icon'),
+  alertBanner: $("alert-banner"),
+  alertTitle: $("alert-title"),
+  alertMessage: $("alert-message"),
+  alertDismiss: $("alert-dismiss-btn"),
 
-  wetStatusBadge: document.getElementById('wet-status-badge'),
-  wetBadgeText: document.getElementById('wet-badge-text'),
-  wetLiquidFill: document.getElementById('wet-liquid-fill'),
-  wetPctVal: document.getElementById('wet-pct-val'),
-  wetCmVal: document.getElementById('wet-cm-val'),
-  wetCmUnit: document.getElementById('wet-cm-unit'),
-  wetDistBar: document.getElementById('wet-dist-bar'),
-  wetCmDesc: document.getElementById('wet-cm-desc'),
-  wetThresholdPill: document.getElementById('wet-threshold-pill'),
-  wetThresholdLabel: document.getElementById('wet-threshold-label'),
-  wetDoorStateIndicator: document.getElementById('wet-door-state-indicator'),
+  browserWarning: $("browser-warning"),
+  enableDemoFromWarning: $("enable-demo-from-warning"),
 
-  dryStatusBadge: document.getElementById('dry-status-badge'),
-  dryBadgeText: document.getElementById('dry-badge-text'),
-  dryLiquidFill: document.getElementById('dry-liquid-fill'),
-  dryPctVal: document.getElementById('dry-pct-val'),
-  dryCmVal: document.getElementById('dry-cm-val'),
-  dryCmUnit: document.getElementById('dry-cm-unit'),
-  dryDistBar: document.getElementById('dry-dist-bar'),
-  dryCmDesc: document.getElementById('dry-cm-desc'),
-  dryThresholdPill: document.getElementById('dry-threshold-pill'),
-  dryThresholdLabel: document.getElementById('dry-threshold-label'),
-  dryDoorStateIndicator: document.getElementById('dry-door-state-indicator'),
+  bleStatusDot: $("ble-status-dot"),
+  bleStatusText: $("ble-status-text"),
+  lastUpdateText: $("last-update-text"),
+  connectBtn: $("ble-connect-btn"),
+  bleBtnText: $("ble-btn-text"),
 
-  buzzerStatusBadge: document.getElementById('buzzer-status-badge'),
-  buzzerBadgeText: document.getElementById('buzzer-badge-text'),
-  buzzerVisualCircle: document.getElementById('buzzer-visual-circle'),
-  buzzerStateHeadline: document.getElementById('buzzer-state-headline'),
-  buzzerExplanation: document.getElementById('buzzer-explanation'),
+  demoBtn: $("demo-mode-btn"),
+  demoBadge: $("demo-badge"),
+  demoControlBar: $("demo-control-bar"),
 
-  itemClassificationBadge: document.getElementById('item-classification-badge'),
-  itemClassText: document.getElementById('item-class-text'),
-  moistResultBox: document.getElementById('moist-result-box'),
-  moistHeroIcon: document.getElementById('moist-hero-icon'),
-  moistClassDisplay: document.getElementById('moist-class-display'),
-  moistNoteDisplay: document.getElementById('moist-note-display'),
-  moistRawDisplay: document.getElementById('moist-raw-display'),
-  adcNeedleIndicator: document.getElementById('adc-needle-indicator'),
+  themeBtn: $("theme-toggle-btn"),
+  moonIcon: $("theme-moon-icon"),
+  sunIcon: $("theme-sun-icon"),
 
-  doorCompWet: document.getElementById('door-comp-wet'),
-  doorCompDry: document.getElementById('door-comp-dry'),
-  doorStateWet: document.getElementById('door-state-wet'),
-  doorStateDry: document.getElementById('door-state-dry'),
-  doorSummaryText: document.getElementById('door-summary-text'),
+  wet: {
+    pct: $("wet-pct-val"),
+    distance: $("wet-cm-val"),
+    distanceBar: $("wet-dist-bar"),
+    liquid: $("wet-liquid-fill"),
+    statusBadge: $("wet-status-badge"),
+    badgeText: $("wet-badge-text"),
+    thresholdPill: $("wet-threshold-pill"),
+    thresholdLabel: $("wet-threshold-label"),
+    distanceDescription: $("wet-cm-desc"),
+    doorIndicator: $("wet-door-state-indicator")
+  },
 
-  btnOpenWet: document.getElementById('btn-open-wet'),
-  btnOpenDry: document.getElementById('btn-open-dry'),
-  commandFeedbackText: document.getElementById('command-feedback-text'),
+  dry: {
+    pct: $("dry-pct-val"),
+    distance: $("dry-cm-val"),
+    distanceBar: $("dry-dist-bar"),
+    liquid: $("dry-liquid-fill"),
+    statusBadge: $("dry-status-badge"),
+    badgeText: $("dry-badge-text"),
+    thresholdPill: $("dry-threshold-pill"),
+    thresholdLabel: $("dry-threshold-label"),
+    distanceDescription: $("dry-cm-desc"),
+    doorIndicator: $("dry-door-state-indicator")
+  },
 
-  historyList: document.getElementById('history-list'),
-  clearHistoryBtn: document.getElementById('clear-history-btn'),
-  toastContainer: document.getElementById('toast-container'),
+  buzzer: {
+    badge: $("buzzer-status-badge"),
+    badgeText: $("buzzer-badge-text"),
+    circle: $("buzzer-visual-circle"),
+    headline: $("buzzer-state-headline"),
+    explanation: $("buzzer-explanation")
+  },
 
-  demoToggleWetFull: document.getElementById('demo-toggle-wet-full'),
-  demoToggleDryFull: document.getElementById('demo-toggle-dry-full'),
-  demoSimWetItem: document.getElementById('demo-sim-wet-item'),
-  demoSimDryItem: document.getElementById('demo-sim-dry-item'),
-  demoSimUnknownItem: document.getElementById('demo-sim-unknown-item'),
-  demoSimSensorError: document.getElementById('demo-sim-sensor-error')
+  classification: {
+    badge: $("item-classification-badge"),
+    badgeText: $("item-class-text"),
+    resultBox: $("moist-result-box"),
+    classDisplay: $("moist-class-display"),
+    note: $("moist-note-display"),
+    raw: $("moist-raw-display"),
+    needle: $("adc-needle-indicator")
+  },
+
+  wetDoor: {
+    indicator: $("wet-door-state-indicator"),
+    lid: $("door-lid-wet"),
+    state: $("door-state-wet"),
+    compartment: $("door-comp-wet")
+  },
+
+  dryDoor: {
+    indicator: $("dry-door-state-indicator"),
+    lid: $("door-lid-dry"),
+    state: $("door-state-dry"),
+    compartment: $("door-comp-dry")
+  },
+
+  doorSummary: $("door-summary-text"),
+  doorOverall: $("door-overall-summary"),
+
+  openWetBtn: $("btn-open-wet"),
+  openDryBtn: $("btn-open-dry"),
+
+  commandFeedback: $("command-feedback-text"),
+  historyList: $("history-list"),
+  clearHistoryBtn: $("clear-history-btn"),
+
+  toastContainer: $("toast-container")
 };
 
-// ============================================================================
-// 4. SAFE INITIALIZATION
-// ============================================================================
+/* ---------------- GENERAL HELPERS ---------------- */
 
-function initializeApp() {
-  initTheme();
-  checkBluetoothSupport();
-  renderHistory();
-  setupEventListeners();
-  registerServiceWorker();
-
-  if (state.relativeTimeInterval) {
-    clearInterval(state.relativeTimeInterval);
-  }
-
-  state.relativeTimeInterval = setInterval(updateRelativeTimeDisplay, 1000);
-
-  // Start buttons disabled until a connection or demo mode is active.
-  setConnectionState('disconnected', 'Disconnected');
-
-  console.log('[SmartBin] Application initialized.');
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeApp, { once: true });
-} else {
-  initializeApp();
-}
-
-function checkBluetoothSupport() {
-  if (!navigator.bluetooth) {
-    console.warn('[Bluetooth] Web Bluetooth is unavailable.');
-
-    DOM.browserWarning?.classList.remove('hidden');
-
-    if (DOM.bleConnectBtn) {
-      DOM.bleConnectBtn.disabled = true;
-      DOM.bleConnectBtn.title = 'Web Bluetooth is not supported in this browser.';
-    }
-  }
-}
-
-function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) return;
-
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .then(reg => console.log('[PWA] Service worker registered:', reg.scope))
-      .catch(err => console.warn('[PWA] Service worker registration failed:', err));
-  }, { once: true });
-}
-
-// ============================================================================
-// 5. SPLASH SCREEN
-// ============================================================================
-
-function hideSplashScreen() {
-  const splash = document.getElementById('splash-screen');
-  if (!splash) return;
-
-  setTimeout(() => splash.classList.add('splash-hidden'), 2500);
-  setTimeout(() => splash.remove(), 3200);
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', hideSplashScreen, { once: true });
-} else {
-  hideSplashScreen();
-}
-
-// ============================================================================
-// 6. THEME MANAGEMENT
-// ============================================================================
-
-function initTheme() {
-  let savedTheme = 'dark';
-
-  try {
-    savedTheme = localStorage.getItem(STORAGE_KEY_THEME) ||
-      (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-  } catch (error) {
-    console.warn('[Theme] Could not read saved theme:', error);
-  }
-
-  applyTheme(savedTheme);
-}
-
-function applyTheme(theme) {
-  theme = theme === 'light' ? 'light' : 'dark';
-
-  document.documentElement.setAttribute('data-theme', theme);
-
-  try {
-    localStorage.setItem(STORAGE_KEY_THEME, theme);
-  } catch (error) {
-    console.warn('[Theme] Could not save theme:', error);
-  }
-
-  DOM.themeMoonIcon?.classList.toggle('hidden', theme === 'light');
-  DOM.themeSunIcon?.classList.toggle('hidden', theme !== 'light');
-}
-
-function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme') || 'dark';
-  applyTheme(current === 'dark' ? 'light' : 'dark');
-}
-
-// ============================================================================
-// 7. BLUETOOTH CONNECTION
-// ============================================================================
-
-async function connectBluetooth() {
-  if (!navigator.bluetooth) {
-    showToast('Web Bluetooth is unavailable. Try Chrome or Edge over HTTPS or localhost.', 'error');
-    return;
-  }
-
-  if (state.isConnected && !state.isDemoMode) {
-    disconnectBluetooth(true);
-    return;
-  }
-
-  if (state.isConnecting) return;
-
-  state.manualDisconnect = false;
-  state.isConnecting = true;
-
-  try {
-    setConnectionState('connecting', 'Select your SmartBin...');
-    showToast('Choose your SmartBin device from the Bluetooth list.', 'info');
-
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: BLE_DEVICE_NAME_PREFIX }],
-      optionalServices: [NORDIC_UART_SERVICE_UUID]
-    });
-
-    state.device = device;
-
-    device.removeEventListener('gattserverdisconnected', onDeviceDisconnected);
-    device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
-
-    await establishBleConnection();
-
-    state.reconnectAttempts = 0;
-    state.isConnected = true;
-    state.isConnecting = false;
-
-    setConnectionState('connected', `Connected: ${state.device.name || 'SmartBin'}`);
-    showToast(`Connected to ${state.device.name || 'SmartBin'}.`, 'success');
-
-    addHistoryItem('info', 'SmartBin Connected', `Connected to ${state.device.name || 'SmartBin'} over BLE`);
-
-    if (state.isDemoMode) toggleDemoMode(false);
-
-  } catch (error) {
-    state.isConnecting = false;
-    console.error('[Bluetooth] Connection failed:', error);
-
-    if (state.isDemoMode) {
-      setConnectionState('connected', 'Demo Mode (Simulated)');
-    } else {
-      setConnectionState('disconnected', 'Disconnected');
-    }
-
-    if (error.name === 'NotFoundError') {
-      showToast('Pairing cancelled or no device selected.', 'info');
-    } else if (error.name === 'SecurityError') {
-      showToast('Bluetooth permission was blocked. Check browser permissions.', 'error');
-    } else {
-      showToast(`Connection failed: ${error.message || 'Unknown error'}`, 'error');
-    }
-  }
-}
-
-async function establishBleConnection() {
-  if (!state.device?.gatt) throw new Error('No Bluetooth device is selected.');
-
-  setConnectionState('connecting', 'Connecting to SmartBin...');
-
-  state.server = await state.device.gatt.connect();
-
-  const service = await state.server.getPrimaryService(NORDIC_UART_SERVICE_UUID);
-
-  state.txCharacteristic = await service.getCharacteristic(NORDIC_UART_TX_CHAR_UUID);
-  state.txCharacteristic.removeEventListener('characteristicvaluechanged', handleBleNotification);
-  await state.txCharacteristic.startNotifications();
-  state.txCharacteristic.addEventListener('characteristicvaluechanged', handleBleNotification);
-
-  state.rxCharacteristic = await service.getCharacteristic(NORDIC_UART_RX_CHAR_UUID);
-
-  state.bleBuffer = '';
-}
-
-function handleBleNotification(event) {
-  try {
-    const bytes = event.target.value;
-    const chunk = new TextDecoder('utf-8').decode(bytes);
-
-    state.bleBuffer += chunk;
-
-    // Process newline-delimited JSON messages.
-    let newlineIndex;
-
-    while ((newlineIndex = state.bleBuffer.indexOf('\n')) !== -1) {
-      const line = state.bleBuffer.slice(0, newlineIndex).trim();
-      state.bleBuffer = state.bleBuffer.slice(newlineIndex + 1);
-
-      if (line) parseAndProcessJsonLine(line);
-    }
-
-    // Avoid retaining a corrupted or unbounded packet.
-    if (state.bleBuffer.length > 4096) {
-      console.warn('[Bluetooth] Oversized incomplete packet discarded.');
-      state.bleBuffer = '';
-    }
-  } catch (error) {
-    console.error('[Bluetooth] Notification handling failed:', error);
-  }
-}
-
-function parseAndProcessJsonLine(line) {
-  try {
-    const payload = JSON.parse(line);
-
-    if (!payload || typeof payload !== 'object') {
-      throw new Error('Telemetry must be a JSON object.');
-    }
-
-    updateDashboard(payload);
-  } catch (error) {
-    console.warn('[Bluetooth] Invalid telemetry ignored:', line, error);
-  }
-}
-
-async function sendBleCommand(command) {
-  command = String(command).toUpperCase();
-
-  if (!['W', 'D'].includes(command)) {
-    showToast('Unknown command.', 'error');
-    return;
-  }
-
-  if (state.isDemoMode) {
-    simulateDemoCommand(command);
-    return;
-  }
-
-  if (!state.isConnected || !state.rxCharacteristic) {
-    showToast('SmartBin is disconnected. Connect or activate Demo Mode.', 'warning');
-    updateCommandFeedback(`Command '${command}' not sent: SmartBin is disconnected.`);
-    return;
-  }
-
-  try {
-    updateCommandFeedback(`Sending '${command}' to ESP32...`);
-
-    const bytes = new TextEncoder().encode(command);
-
-    if (typeof state.rxCharacteristic.writeValueWithoutResponse === 'function') {
-      await state.rxCharacteristic.writeValueWithoutResponse(bytes);
-    } else {
-      await state.rxCharacteristic.writeValue(bytes);
-    }
-
-    const label = command === 'W' ? 'Wet compartment' : 'Dry compartment';
-
-    updateCommandFeedback(`Command '${command}' sent successfully: ${label} requested to open.`);
-    showToast(`Command '${command}' sent to ${label}.`, 'success');
-    addHistoryItem('door', `Manual Command Sent: ${command}`, `Sent ${label} open command`);
-
-  } catch (error) {
-    console.error('[Bluetooth] Command failed:', error);
-    updateCommandFeedback(`Command failed: ${error.message}`);
-    showToast(`Failed to send command: ${error.message}`, 'error');
-  }
-}
-
-// ============================================================================
-// 8. DISCONNECTION AND AUTOMATIC RECONNECTION
-// ============================================================================
-
-function onDeviceDisconnected() {
-  console.warn('[Bluetooth] Device disconnected.');
-
-  state.isConnected = false;
-  state.isConnecting = false;
-  state.txCharacteristic = null;
-  state.rxCharacteristic = null;
-  state.server = null;
-  state.bleBuffer = '';
-
-  addHistoryItem('info', 'SmartBin Disconnected', 'BLE connection lost');
-
-  if (state.manualDisconnect || state.isDemoMode || !state.device) {
-    setConnectionState(state.isDemoMode ? 'connected' : 'disconnected',
-      state.isDemoMode ? 'Demo Mode (Simulated)' : 'Disconnected');
-    return;
-  }
-
-  scheduleReconnect();
-}
-
-function scheduleReconnect() {
-  if (state.reconnectTimeoutId) {
-    clearTimeout(state.reconnectTimeoutId);
-    state.reconnectTimeoutId = null;
-  }
-
-  if (state.reconnectAttempts >= state.maxReconnectAttempts) {
-    setConnectionState('disconnected', 'Disconnected');
-    showToast('Automatic reconnection failed. Press Connect Bin to try again.', 'error');
-    return;
-  }
-
-  state.reconnectAttempts++;
-
-  const delay = state.reconnectAttempts * 2000;
-
-  setConnectionState(
-    'connecting',
-    `Reconnecting in ${delay / 1000}s (${state.reconnectAttempts}/${state.maxReconnectAttempts})...`
-  );
-
-  showToast(`Reconnecting to SmartBin (attempt ${state.reconnectAttempts})...`, 'warning');
-
-  state.reconnectTimeoutId = setTimeout(attemptReconnect, delay);
-}
-
-async function attemptReconnect() {
-  state.reconnectTimeoutId = null;
-
-  if (state.manualDisconnect || state.isDemoMode || !state.device) return;
-
-  try {
-    state.isConnecting = true;
-    await establishBleConnection();
-
-    state.isConnected = true;
-    state.isConnecting = false;
-    state.reconnectAttempts = 0;
-
-    setConnectionState('connected', `Connected: ${state.device.name || 'SmartBin'}`);
-    showToast('SmartBin connection restored.', 'success');
-    addHistoryItem('info', 'SmartBin Reconnected', 'BLE connection restored automatically');
-
-  } catch (error) {
-    state.isConnecting = false;
-    console.warn('[Bluetooth] Reconnection attempt failed:', error);
-
-    if (state.device?.gatt?.connected) {
-      try {
-        state.device.gatt.disconnect();
-      } catch (_) {}
-    }
-
-    scheduleReconnect();
-  }
-}
-
-function disconnectBluetooth(userInitiated = true) {
-  state.manualDisconnect = userInitiated;
-
-  if (state.reconnectTimeoutId) {
-    clearTimeout(state.reconnectTimeoutId);
-    state.reconnectTimeoutId = null;
-  }
-
-  state.reconnectAttempts = 0;
-  state.isConnecting = false;
-
-  const oldDevice = state.device;
-
-  if (oldDevice) {
-    oldDevice.removeEventListener('gattserverdisconnected', onDeviceDisconnected);
-  }
-
-  if (oldDevice?.gatt?.connected) {
-    oldDevice.gatt.disconnect();
-  }
-
-  state.isConnected = false;
-  state.device = null;
-  state.server = null;
-  state.txCharacteristic = null;
-  state.rxCharacteristic = null;
-  state.bleBuffer = '';
-
-  setConnectionState(state.isDemoMode ? 'connected' : 'disconnected',
-    state.isDemoMode ? 'Demo Mode (Simulated)' : 'Disconnected');
-
-  if (userInitiated) showToast('Disconnected from SmartBin.', 'info');
-}
-
-function setConnectionState(status, text) {
-  if (DOM.bleStatusText) DOM.bleStatusText.textContent = text;
-
-  if (DOM.bleStatusDot) {
-    DOM.bleStatusDot.className = 'status-dot';
-
-    if (status === 'connected') DOM.bleStatusDot.classList.add('dot-connected');
-    else if (status === 'connecting') DOM.bleStatusDot.classList.add('dot-connecting');
-    else DOM.bleStatusDot.classList.add('dot-disconnected');
-  }
-
-  DOM.bleConnectBtn?.classList.toggle('connected-state', status === 'connected');
-
-  if (DOM.bleBtnText) {
-    DOM.bleBtnText.textContent =
-      status === 'connected' && !state.isDemoMode ? 'Disconnect' :
-      status === 'connecting' ? 'Connecting...' :
-      status === 'connected' ? 'Demo Active' : 'Connect Bin';
-  }
-
-  if (DOM.bleConnectBtn) {
-    DOM.bleConnectBtn.disabled = status === 'connecting' && !state.isDemoMode;
-  }
-
-  const controlsEnabled = state.isConnected || state.isDemoMode;
-
-  if (DOM.btnOpenWet) DOM.btnOpenWet.disabled = !controlsEnabled;
-  if (DOM.btnOpenDry) DOM.btnOpenDry.disabled = !controlsEnabled;
-}
-
-// ============================================================================
-// 9. DASHBOARD UPDATE
-// ============================================================================
-
-function updateDashboard(data) {
-  if (!data || typeof data !== 'object') return;
-
-  const previousData = state.lastData;
-  state.lastData = data;
-  state.lastUpdateTime = new Date();
-
-  updateRelativeTimeDisplay();
-
-  updateWetCard(data.wet);
-  updateDryCard(data.dry);
-  updateBuzzerCard(data.buzzer);
-  updateItemAndDoorCard(data.moist, data.door);
-
-  // Pass previous telemetry explicitly to fix alert dismissal logic.
-  updateAlertBanner(data.wet, data.dry, previousData);
-
-  detectAndLogTransitions(previousData, data);
-}
-
-function updateWetCard(wet) {
-  if (!wet) return;
-
-  const pct = clampNumber(wet.pct, 0, 100, 0);
-  DOM.wetPctVal.textContent = Math.round(pct);
-  DOM.wetLiquidFill.style.height = `${pct}%`;
-
-  if (!isValidDistance(wet.cm)) {
-    DOM.wetCmVal.textContent = 'ERR';
-    DOM.wetCmUnit.textContent = '';
-    DOM.wetCmDesc.textContent = 'Ultrasonic sensor unreadable';
-    DOM.wetDistBar.style.width = '0%';
-    DOM.wetStatusBadge.className = 'status-badge badge-sensor-error';
-    DOM.wetBadgeText.textContent = 'SENSOR ERROR';
-    DOM.wetThresholdLabel.textContent = 'Sensor Fault';
-    DOM.wetThresholdPill.classList.remove('warning-active');
-    return;
-  }
-
-  DOM.wetCmVal.textContent = Number(wet.cm).toFixed(1);
-  DOM.wetCmUnit.textContent = 'cm';
-  DOM.wetCmDesc.textContent = 'Clearance to sensor lid';
-
-  DOM.wetDistBar.style.width =
-    `${clampNumber((30 - Number(wet.cm)) / 30 * 100, 0, 100, 0)}%`;
-
-  if (wet.full) {
-    DOM.wetStatusBadge.className = 'status-badge badge-full';
-    DOM.wetBadgeText.textContent = 'FULL';
-    DOM.wetThresholdLabel.textContent = `CAPACITY REACHED (${Math.round(pct)}%)`;
-    DOM.wetThresholdPill.classList.add('warning-active');
-  } else {
-    DOM.wetStatusBadge.className = 'status-badge badge-not-full';
-    DOM.wetBadgeText.textContent = 'NOT FULL';
-    DOM.wetThresholdLabel.textContent = `Normal Level (${Math.round(pct)}%)`;
-    DOM.wetThresholdPill.classList.remove('warning-active');
-  }
-}
-
-function updateDryCard(dry) {
-  if (!dry) return;
-
-  const pct = clampNumber(dry.pct, 0, 100, 0);
-  DOM.dryPctVal.textContent = Math.round(pct);
-  DOM.dryLiquidFill.style.height = `${pct}%`;
-
-  if (!isValidDistance(dry.cm)) {
-    DOM.dryCmVal.textContent = 'ERR';
-    DOM.dryCmUnit.textContent = '';
-    DOM.dryCmDesc.textContent = 'Ultrasonic sensor unreadable';
-    DOM.dryDistBar.style.width = '0%';
-    DOM.dryStatusBadge.className = 'status-badge badge-sensor-error';
-    DOM.dryBadgeText.textContent = 'SENSOR ERROR';
-    DOM.dryThresholdLabel.textContent = 'Sensor Fault';
-    DOM.dryThresholdPill.classList.remove('warning-active');
-    return;
-  }
-
-  DOM.dryCmVal.textContent = Number(dry.cm).toFixed(1);
-  DOM.dryCmUnit.textContent = 'cm';
-  DOM.dryCmDesc.textContent = 'Clearance to sensor lid';
-
-  DOM.dryDistBar.style.width =
-    `${clampNumber((30 - Number(dry.cm)) / 30 * 100, 0, 100, 0)}%`;
-
-  if (dry.full) {
-    DOM.dryStatusBadge.className = 'status-badge badge-full';
-    DOM.dryBadgeText.textContent = 'FULL';
-    DOM.dryThresholdLabel.textContent = `CAPACITY REACHED (${Math.round(pct)}%)`;
-    DOM.dryThresholdPill.classList.add('warning-active');
-  } else {
-    DOM.dryStatusBadge.className = 'status-badge badge-not-full';
-    DOM.dryBadgeText.textContent = 'NOT FULL';
-    DOM.dryThresholdLabel.textContent = `Normal Level (${Math.round(pct)}%)`;
-    DOM.dryThresholdPill.classList.remove('warning-active');
-  }
-}
-
-function isValidDistance(cm) {
-  return cm !== null && cm !== undefined &&
-    Number.isFinite(Number(cm)) && Number(cm) >= 0;
-}
-
-function clampNumber(value, min, max, fallback = 0) {
+function safeNumber(value, fallback = 0) {
   const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(max, Math.max(min, number));
+  return Number.isFinite(number) ? number : fallback;
 }
 
-function updateBuzzerCard(buzzerOn) {
-  const active = Boolean(buzzerOn);
-
-  DOM.buzzerStatusBadge.className =
-    `status-badge ${active ? 'badge-buzzer-on' : 'badge-buzzer-off'}`;
-
-  DOM.buzzerBadgeText.textContent = active ? 'ACTIVE' : 'OFF';
-  DOM.buzzerVisualCircle.classList.toggle('buzzer-on', active);
-  DOM.buzzerStateHeadline.textContent = active ? 'Alarm Buzzer Sounding!' : 'Buzzer Standby';
-
-  DOM.buzzerExplanation.textContent = active
-    ? 'The ESP32 reports that the hardware buzzer is active. Check the bin status.'
-    : 'The buzzer is currently reported as OFF.';
-}
-
-function updateItemAndDoorCard(moist, doorState) {
-  if (moist) {
-    const cls = String(moist.cls || 'UNKNOWN').toUpperCase();
-    const rawValue = Number(moist.raw);
-    const raw = Number.isFinite(rawValue) ? Math.round(rawValue) : 0;
-
-    DOM.moistRawDisplay.textContent = `ADC: ${raw}`;
-    DOM.adcNeedleIndicator.style.left =
-      `${clampNumber(raw / 4095 * 100, 0, 100, 0)}%`;
-
-    DOM.moistResultBox.className = 'moist-result-hero';
-
-    if (cls === 'WET') {
-      DOM.itemClassificationBadge.className = 'status-badge badge-moist-wet';
-      DOM.itemClassText.textContent = 'WET WASTE DETECTED';
-      DOM.moistResultBox.classList.add('hero-wet');
-      DOM.moistClassDisplay.textContent = 'WET WASTE';
-      DOM.moistNoteDisplay.textContent = 'Organic / High Moisture Content';
-      setMoistHeroIcon('wet');
-    } else if (cls === 'DRY') {
-      DOM.itemClassificationBadge.className = 'status-badge badge-moist-dry';
-      DOM.itemClassText.textContent = 'DRY WASTE DETECTED';
-      DOM.moistResultBox.classList.add('hero-dry');
-      DOM.moistClassDisplay.textContent = 'DRY WASTE';
-      DOM.moistNoteDisplay.textContent = 'Inorganic / Low Moisture Content';
-      setMoistHeroIcon('dry');
-    } else {
-      DOM.itemClassificationBadge.className = 'status-badge badge-moist-unknown';
-      DOM.itemClassText.textContent = 'AMBIGUOUS ITEM';
-      DOM.moistResultBox.classList.add('hero-unknown');
-      DOM.moistClassDisplay.textContent = 'UNKNOWN';
-      DOM.moistNoteDisplay.textContent = 'Ambiguous - handled safely';
-      setMoistHeroIcon('unknown');
-    }
-  }
-
-  const door = String(doorState || 'CLOSED').toUpperCase();
-
-  DOM.doorCompWet.classList.remove('door-open');
-  DOM.doorCompDry.classList.remove('door-open');
-
-  DOM.doorStateWet.textContent = 'CLOSED';
-  DOM.doorStateDry.textContent = 'CLOSED';
-
-  DOM.wetDoorStateIndicator.className = 'door-status-pill door-pill-closed';
-  DOM.wetDoorStateIndicator.textContent = 'CLOSED';
-
-  DOM.dryDoorStateIndicator.className = 'door-status-pill door-pill-closed';
-  DOM.dryDoorStateIndicator.textContent = 'CLOSED';
-
-  if (door === 'WET') {
-    DOM.doorCompWet.classList.add('door-open');
-    DOM.doorStateWet.textContent = 'OPEN';
-    DOM.wetDoorStateIndicator.className = 'door-status-pill door-pill-open';
-    DOM.wetDoorStateIndicator.textContent = 'OPEN';
-    DOM.doorSummaryText.textContent = 'Wet Chute Door is currently OPEN for waste deposition';
-  } else if (door === 'DRY') {
-    DOM.doorCompDry.classList.add('door-open');
-    DOM.doorStateDry.textContent = 'OPEN';
-    DOM.dryDoorStateIndicator.className = 'door-status-pill door-pill-open';
-    DOM.dryDoorStateIndicator.textContent = 'OPEN';
-    DOM.doorSummaryText.textContent = 'Dry Chute Door is currently OPEN for waste deposition';
-  } else {
-    DOM.doorSummaryText.textContent = 'Both intake doors are securely closed';
+function setText(element, value) {
+  if (element) {
+    element.textContent = value;
   }
 }
 
-function setMoistHeroIcon(type) {
-  const icons = {
-    wet: '<path stroke-linecap="round" stroke-linejoin="round" d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/>',
-    dry: '<path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>',
-    unknown: '<path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
-  };
-
-  DOM.moistHeroIcon.innerHTML =
-    `<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2">${icons[type] || icons.unknown}</svg>`;
-}
-
-// ============================================================================
-// 10. ALERT BANNER — FIXED DISMISSAL LOGIC
-// ============================================================================
-
-function updateAlertBanner(wet, dry, previousData = null) {
-  const wetFull = Boolean(wet?.full);
-  const dryFull = Boolean(dry?.full);
-
-  const wasWetFull = Boolean(previousData?.wet?.full);
-  const wasDryFull = Boolean(previousData?.dry?.full);
-
-  // A newly full bin resets a previous dismissal.
-  if ((wetFull && !wasWetFull) || (dryFull && !wasDryFull)) {
-    state.alertDismissed = false;
-  }
-
-  if (!wetFull && !dryFull) {
-    DOM.alertBanner.classList.add('hidden');
-    state.alertDismissed = false;
-    return;
-  }
-
-  if (state.alertDismissed) {
-    DOM.alertBanner.classList.add('hidden');
-    return;
-  }
-
-  DOM.alertBanner.classList.remove('hidden');
-
-  if (wetFull && dryFull) {
-    DOM.alertTitle.textContent = 'CRITICAL ALERT: BOTH BINS ARE FULL!';
-    DOM.alertMessage.textContent =
-      'Both Wet and Dry compartments are full. Please empty both bins.';
-  } else if (wetFull) {
-    DOM.alertTitle.textContent = 'WARNING: Wet Waste Compartment is FULL!';
-    DOM.alertMessage.textContent =
-      'The wet bin has reached its full threshold. Please empty it.';
-  } else {
-    DOM.alertTitle.textContent = 'WARNING: Dry Waste Compartment is FULL!';
-    DOM.alertMessage.textContent =
-      'The dry bin has reached its full threshold. Please empty it.';
+function setHidden(element, hidden) {
+  if (element) {
+    element.classList.toggle("hidden", hidden);
   }
 }
 
-function updateRelativeTimeDisplay() {
-  if (!state.lastUpdateTime) {
-    DOM.lastUpdateText.textContent = 'Last update: --';
-    return;
-  }
-
-  const seconds = Math.floor((Date.now() - state.lastUpdateTime.getTime()) / 1000);
-
-  if (seconds < 2) {
-    DOM.lastUpdateText.textContent = 'Last update: Just now';
-  } else if (seconds < 60) {
-    DOM.lastUpdateText.textContent = `Last update: ${seconds}s ago`;
-  } else {
-    DOM.lastUpdateText.textContent =
-      `Last update: ${state.lastUpdateTime.toLocaleTimeString([], {
-        hour: '2-digit', minute: '2-digit', second: '2-digit'
-      })}`;
-  }
+function formatTime(date = new Date()) {
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
 }
 
-function updateCommandFeedback(message) {
-  if (DOM.commandFeedbackText) DOM.commandFeedbackText.textContent = message;
+function showToast(message, type = "info") {
+  if (!DOM.toastContainer) return;
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+
+  DOM.toastContainer.appendChild(toast);
+
+  window.setTimeout(() => {
+    toast.classList.add("toast-visible");
+  }, 10);
+
+  window.setTimeout(() => {
+    toast.classList.remove("toast-visible");
+
+    window.setTimeout(() => toast.remove(), 300);
+  }, 3500);
 }
 
-// ============================================================================
-// 11. EVENT HISTORY
-// ============================================================================
+/* ---------------- EVENT HISTORY ---------------- */
 
-function detectAndLogTransitions(previous, current) {
-  if (!current) return;
-
-  if (current.wet?.full && !previous?.wet?.full) {
-    addHistoryItem('full', 'Wet Compartment Full',
-      `Capacity reached (${current.wet.pct ?? '--'}% fill, ${current.wet.cm ?? '--'} cm)`);
-  }
-
-  if (current.dry?.full && !previous?.dry?.full) {
-    addHistoryItem('full', 'Dry Compartment Full',
-      `Capacity reached (${current.dry.pct ?? '--'}% fill, ${current.dry.cm ?? '--'} cm)`);
-  }
-
-  const currentDoor = String(current.door || 'CLOSED').toUpperCase();
-  const previousDoor = String(previous?.door || 'CLOSED').toUpperCase();
-
-  if (currentDoor !== 'CLOSED' && currentDoor !== previousDoor) {
-    addHistoryItem('door', `${currentDoor} Door Opened`, 'Chute opened for waste intake');
-  }
-
-  if (current.moist) {
-    const oldMoist = previous?.moist;
-    const currentRaw = Number(current.moist.raw);
-    const oldRaw = Number(oldMoist?.raw);
-
-    const classificationChanged =
-      !oldMoist ||
-      String(oldMoist.cls).toUpperCase() !== String(current.moist.cls).toUpperCase();
-
-    const rawChanged =
-      Number.isFinite(currentRaw) &&
-      Number.isFinite(oldRaw) &&
-      Math.abs(oldRaw - currentRaw) > 200;
-
-    if (classificationChanged || rawChanged) {
-      const cls = String(current.moist.cls || 'UNKNOWN').toUpperCase();
-      const type = cls === 'WET' ? 'wet' : cls === 'DRY' ? 'dry' : 'info';
-
-      addHistoryItem(
-        type,
-        `Item Classified: ${cls}`,
-        cls === 'UNKNOWN' ? 'Ambiguous item detected' : `${cls} detected (ADC: ${current.moist.raw ?? '--'})`
-      );
-    }
-  }
-
-  if (current.buzzer && !previous?.buzzer) {
-    addHistoryItem('buzzer', 'Alert Buzzer Triggered', 'The ESP32 reports that the buzzer is active');
-  }
-}
-
-function getHistoryFromStorage() {
+function loadHistory() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_HISTORY);
-    if (!raw) return [];
+    const saved = localStorage.getItem(STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
 
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    state.history = Array.isArray(parsed) ? parsed : [];
   } catch (error) {
-    console.warn('[History] Could not read history:', error);
-    return [];
+    console.warn("Could not load saved history:", error);
+    state.history = [];
+  }
+
+  renderHistory();
+}
+
+function saveHistory() {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(state.history.slice(0, MAX_HISTORY))
+    );
+  } catch (error) {
+    console.warn("Could not save history:", error);
   }
 }
 
-function addHistoryItem(type, title, meta) {
-  const history = getHistoryFromStorage();
-  const now = new Date();
-
-  history.unshift({
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+function addHistory(message, type = "info") {
+  state.history.unshift({
+    message,
     type,
-    title,
-    meta,
-    timestamp: now.toISOString(),
-    timeStr: now.toLocaleTimeString([], {
-      hour: '2-digit', minute: '2-digit', second: '2-digit'
-    })
+    time: new Date().toISOString()
   });
 
-  history.length = Math.min(history.length, MAX_HISTORY_ITEMS);
+  state.history = state.history.slice(0, MAX_HISTORY);
 
-  try {
-    localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(history));
-  } catch (error) {
-    console.warn('[History] Could not save history:', error);
-  }
-
+  saveHistory();
   renderHistory();
 }
 
 function renderHistory() {
-  const history = getHistoryFromStorage();
-
   if (!DOM.historyList) return;
 
-  if (history.length === 0) {
-    DOM.historyList.innerHTML = `
-      <li class="history-empty">
-        <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" fill="none" stroke-width="1.5">
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="12" y1="8" x2="12" y2="12"/>
-          <line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-        <span>No recorded events yet. Connect your SmartBin or toggle Demo Mode!</span>
-      </li>`;
+  DOM.historyList.replaceChildren();
+
+  if (state.history.length === 0) {
+    const item = document.createElement("li");
+    item.className = "history-empty";
+    item.textContent =
+      "No recorded events yet. Connect your SmartBin or toggle Demo Mode!";
+
+    DOM.historyList.appendChild(item);
     return;
   }
 
-  const iconPaths = {
-    full: '<path d="M10 2L1 18h18L10 2zm-1 5h2v5H9zm0 7h2v2H9z"/>',
-    wet: '<path d="M10 1C8 5 3 9 3 13a7 7 0 0014 0c0-4-5-8-7-12z"/>',
-    dry: '<path d="M3 2h4v16H3zM11 5h6v13h-6z"/>',
-    door: '<path d="M4 2h12v16H4zM12 9h1v2h-1z"/>',
-    buzzer: '<path d="M2 8h4l5-4v12l-5-4H2zM14 7q4 3 0 6"/>',
-    info: '<circle cx="10" cy="10" r="8"/><path d="M10 9v5m0-8v1"/>'
-  };
+  state.history.forEach((event) => {
+    const item = document.createElement("li");
+    item.className = `history-item history-${event.type || "info"}`;
 
-  DOM.historyList.innerHTML = history.map(item => {
-    const safeType = Object.prototype.hasOwnProperty.call(iconPaths, item.type)
-      ? item.type : 'info';
+    const message = document.createElement("span");
+    message.className = "history-message";
+    message.textContent = event.message || "System event";
 
-    const iconClass = {
-      full: 'hist-icon-full',
-      wet: 'hist-icon-wet',
-      dry: 'hist-icon-dry',
-      door: 'hist-icon-door',
-      buzzer: 'hist-icon-buzzer',
-      info: 'hist-icon-info'
-    }[safeType];
+    const time = document.createElement("time");
+    time.className = "history-time";
 
-    return `
-      <li class="history-item">
-        <div class="history-icon-box ${iconClass}" aria-hidden="true">
-          <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor">
-            ${iconPaths[safeType]}
-          </svg>
-        </div>
-        <div class="history-content">
-          <span class="history-title">${escapeHtml(item.title)}</span>
-          <span class="history-meta">${escapeHtml(item.meta || '')}</span>
-        </div>
-        <span class="history-time" title="${escapeHtml(item.timestamp || '')}">
-          ${escapeHtml(item.timeStr || '')}
-        </span>
-      </li>`;
-  }).join('');
+    const date = new Date(event.time);
+    time.textContent = Number.isNaN(date.getTime())
+      ? "--:--:--"
+      : date.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        });
+
+    item.append(message, time);
+    DOM.historyList.appendChild(item);
+  });
 }
 
 function clearHistory() {
-  try {
-    localStorage.removeItem(STORAGE_KEY_HISTORY);
-  } catch (error) {
-    console.warn('[History] Could not clear history:', error);
-  }
-
+  state.history = [];
+  saveHistory();
   renderHistory();
-  showToast('Event history cleared.', 'info');
+
+  showToast("Event history cleared.", "success");
 }
 
-// ============================================================================
-// 12. DEMO MODE
-// ============================================================================
+/* ---------------- CONNECTION STATUS ---------------- */
 
-function toggleDemoMode(forceState) {
-  const enable = typeof forceState === 'boolean' ? forceState : !state.isDemoMode;
+function updateConnectionStatus(connected, message) {
+  state.connected = connected;
 
-  if (enable === state.isDemoMode) return;
+  if (DOM.bleStatusDot) {
+    DOM.bleStatusDot.classList.toggle("dot-disconnected", !connected);
+    DOM.bleStatusDot.classList.toggle("dot-connected", connected);
+  }
 
-  if (enable) {
-    if (state.isConnected || state.device) {
-      disconnectBluetooth(false);
-    }
+  setText(
+    DOM.bleStatusText,
+    message || (connected ? "Connected" : "Disconnected")
+  );
 
-    state.isDemoMode = true;
+  setText(
+    DOM.bleBtnText,
+    connected ? "Disconnect Bin" : "Connect Bin"
+  );
 
-    DOM.demoModeBtn.classList.add('active');
-    DOM.demoModeBtn.setAttribute('aria-pressed', 'true');
-    DOM.demoBadge.textContent = 'ON';
-    DOM.demoControlBar.classList.remove('hidden');
+  if (DOM.connectBtn) {
+    DOM.connectBtn.classList.toggle("is-connected", connected);
+  }
 
-    setConnectionState('connected', 'Demo Mode (Simulated)');
-    showToast('Demo Mode activated. Displaying simulated sensor readings.', 'info');
-    addHistoryItem('info', 'Demo Mode Activated', 'Started simulated telemetry');
-
-    startDemoSimulationLoop();
-  } else {
-    state.isDemoMode = false;
-
-    DOM.demoModeBtn.classList.remove('active');
-    DOM.demoModeBtn.setAttribute('aria-pressed', 'false');
-    DOM.demoBadge.textContent = 'OFF';
-    DOM.demoControlBar.classList.add('hidden');
-
-    if (state.demoIntervalId) clearInterval(state.demoIntervalId);
-    if (state.demoDoorTimerId) clearTimeout(state.demoDoorTimerId);
-
-    state.demoIntervalId = null;
-    state.demoDoorTimerId = null;
-
-    setConnectionState('disconnected', 'Disconnected');
-    showToast('Demo Mode deactivated.', 'info');
-    addHistoryItem('info', 'Demo Mode Stopped', 'Simulation stopped');
+  if (DOM.lastUpdateText && !state.lastData) {
+    setText(
+      DOM.lastUpdateText,
+      connected ? "Waiting for sensor data..." : "Last update: --"
+    );
   }
 }
 
-function startDemoSimulationLoop() {
-  if (state.demoIntervalId) clearInterval(state.demoIntervalId);
-
-  updateDashboard(JSON.parse(JSON.stringify(state.demoData)));
-
-  let cycles = 0;
-
-  state.demoIntervalId = setInterval(() => {
-    if (!state.isDemoMode) return;
-
-    cycles++;
-
-    if (cycles % 3 === 0) {
-      state.demoData.wet.pct = clampNumber(
-        state.demoData.wet.pct + (Math.random() > 0.3 ? 1 : -1), 0, 100, 45
-      );
-
-      state.demoData.dry.pct = clampNumber(
-        state.demoData.dry.pct + (Math.random() > 0.4 ? 1 : 0), 0, 100, 30
-      );
-
-      if (state.demoData.wet.cm !== -1) {
-        state.demoData.wet.cm =
-          Number(Math.max(2, (100 - state.demoData.wet.pct) * 0.28).toFixed(1));
-      }
-
-      if (state.demoData.dry.cm !== -1) {
-        state.demoData.dry.cm =
-          Number(Math.max(2, (100 - state.demoData.dry.pct) * 0.32).toFixed(1));
-      }
-
-      state.demoData.wet.full = state.demoData.wet.pct >= 90;
-      state.demoData.dry.full = state.demoData.dry.pct >= 90;
-      state.demoData.buzzer = state.demoData.wet.full || state.demoData.dry.full;
-    }
-
-    if (cycles % 16 === 0 && state.demoData.door === 'CLOSED') {
-      const random = Math.random();
-
-      if (random < 0.45) simulateDropItem('WET');
-      else if (random < 0.85) simulateDropItem('DRY');
-      else simulateDropItem('UNKNOWN');
-    }
-
-    updateDashboard(JSON.parse(JSON.stringify(state.demoData)));
-  }, 600);
+function updateLastUpdate() {
+  setText(DOM.lastUpdateText, `Last update: ${formatTime()}`);
 }
 
-function simulateDropItem(cls) {
-  let raw = 2100;
+/* ---------------- BIN CAPACITY CALCULATIONS ---------------- */
 
-  if (cls === 'WET') raw = Math.floor(2700 + Math.random() * 1200);
-  else if (cls === 'DRY') raw = Math.floor(500 + Math.random() * 900);
-  else raw = Math.floor(1800 + Math.random() * 500);
+/*
+  The ESP32 may send:
+  - distance in centimetres
+  - percentage filled
+  - a full/not-full status
 
-  state.demoData.moist = { raw, cls };
-  state.demoData.door = cls === 'DRY' ? 'DRY' : 'WET';
+  If percentage is not supplied, capacity is calculated using
+  distance and a default bin height of 18 cm.
 
-  if (state.demoDoorTimerId) clearTimeout(state.demoDoorTimerId);
+  Change BIN_HEIGHT_CM if your actual bin height differs.
+*/
 
-  updateDashboard(JSON.parse(JSON.stringify(state.demoData)));
+const BIN_HEIGHT_CM = 18;
 
-  state.demoDoorTimerId = setTimeout(() => {
-    state.demoData.door = 'CLOSED';
-    updateDashboard(JSON.parse(JSON.stringify(state.demoData)));
-  }, 2500);
+function normalizeBin(bin) {
+  if (!bin || typeof bin !== "object") {
+    return {
+      distance: -1,
+      percent: 0,
+      full: false,
+      valid: false
+    };
+  }
+
+  const distance = safeNumber(
+    bin.distance ?? bin.cm ?? bin.dist,
+    -1
+  );
+
+  const hasPercent =
+    bin.percent !== undefined ||
+    bin.percentage !== undefined ||
+    bin.fill !== undefined;
+
+  let percent;
+
+  if (hasPercent) {
+    percent = safeNumber(
+      bin.percent ?? bin.percentage ?? bin.fill,
+      0
+    );
+  } else if (distance >= 0) {
+    percent = ((BIN_HEIGHT_CM - distance) / BIN_HEIGHT_CM) * 100;
+  } else {
+    percent = 0;
+  }
+
+  percent = clamp(Math.round(percent), 0, 100);
+
+  const valid = distance >= 0 || hasPercent;
+
+  const full = bin.full !== undefined
+    ? Boolean(bin.full)
+    : percent >= FULL_THRESHOLD;
+
+  return {
+    distance,
+    percent,
+    full,
+    valid
+  };
 }
 
-function simulateDemoCommand(command) {
-  const door = command === 'W' ? 'WET' : 'DRY';
+/* ---------------- BIN DASHBOARD ---------------- */
 
-  state.demoData.door = door;
+function updateBinDisplay(elements, bin) {
+  if (!elements) return;
 
-  updateCommandFeedback(`Demo: Servo triggered -> Opened ${door} compartment door.`);
-  showToast(`Demo: Opened ${door} door.`, 'info');
-  addHistoryItem('door', `Manual Command: ${command} (Demo)`, `Opened ${door} door chute`);
+  setText(elements.pct, bin.valid ? bin.percent : "--");
 
-  updateDashboard(JSON.parse(JSON.stringify(state.demoData)));
+  setText(
+    elements.distance,
+    bin.distance >= 0 ? bin.distance.toFixed(1) : "--"
+  );
 
-  if (state.demoDoorTimerId) clearTimeout(state.demoDoorTimerId);
+  if (elements.liquid) {
+    elements.liquid.style.height =
+      `${bin.valid ? bin.percent : 0}%`;
+  }
 
-  state.demoDoorTimerId = setTimeout(() => {
-    state.demoData.door = 'CLOSED';
-    updateCommandFeedback('Demo: Chute door closed automatically.');
-    updateDashboard(JSON.parse(JSON.stringify(state.demoData)));
-  }, 2500);
+  if (elements.distanceBar) {
+    const distanceWidth = bin.distance >= 0
+      ? clamp((bin.distance / BIN_HEIGHT_CM) * 100, 0, 100)
+      : 0;
+
+    elements.distanceBar.style.width = `${distanceWidth}%`;
+  }
+
+  if (elements.statusBadge) {
+    elements.statusBadge.classList.toggle(
+      "badge-full",
+      bin.full && bin.valid
+    );
+
+    elements.statusBadge.classList.toggle(
+      "badge-not-full",
+      !bin.full || !bin.valid
+    );
+
+    elements.statusBadge.classList.toggle(
+      "badge-error",
+      !bin.valid
+    );
+  }
+
+  setText(
+    elements.badgeText,
+    !bin.valid ? "SENSOR ERROR" : bin.full ? "FULL" : "NOT FULL"
+  );
+
+  if (elements.thresholdPill) {
+    elements.thresholdPill.classList.toggle(
+      "threshold-danger",
+      bin.full && bin.valid
+    );
+
+    elements.thresholdPill.classList.toggle(
+      "threshold-normal",
+      !bin.full || !bin.valid
+    );
+
+    elements.thresholdPill.classList.toggle(
+      "threshold-error",
+      !bin.valid
+    );
+  }
+
+  setText(
+    elements.thresholdLabel,
+    !bin.valid
+      ? "Sensor Reading Invalid"
+      : bin.full
+        ? "FULL — Empty Bin"
+        : `Normal Level (< ${FULL_THRESHOLD}%)`
+  );
+
+  setText(
+    elements.distanceDescription,
+    !bin.valid
+      ? "Check ultrasonic sensor"
+      : bin.distance >= 0
+        ? "Clearance to lid"
+        : "Distance unavailable"
+  );
 }
 
-// ============================================================================
-// 13. EVENT LISTENERS
-// ============================================================================
+/* ---------------- ALERT BANNER ---------------- */
 
-function setupEventListeners() {
-  DOM.bleConnectBtn?.addEventListener('click', connectBluetooth);
-  DOM.demoModeBtn?.addEventListener('click', () => toggleDemoMode());
+function updateAlertBanner(wet, dry, previousData) {
+  const wetFull = wet.valid && wet.full;
+  const dryFull = dry.valid && dry.full;
 
-  DOM.enableDemoFromWarning?.addEventListener('click', () => {
-    DOM.browserWarning?.classList.add('hidden');
-    toggleDemoMode(true);
-  });
-
-  DOM.themeToggleBtn?.addEventListener('click', toggleTheme);
-
-  DOM.alertDismissBtn?.addEventListener('click', () => {
-    state.alertDismissed = true;
-    DOM.alertBanner?.classList.add('hidden');
-  });
-
-  DOM.btnOpenWet?.addEventListener('click', () => sendBleCommand('W'));
-  DOM.btnOpenDry?.addEventListener('click', () => sendBleCommand('D'));
-  DOM.clearHistoryBtn?.addEventListener('click', clearHistory);
-
-  window.addEventListener('keydown', event => {
-    const tag = event.target?.tagName;
-
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) return;
-    if (event.ctrlKey || event.altKey || event.metaKey) return;
-
-    if (event.key === 'w' || event.key === 'W') {
-      event.preventDefault();
-      animateButtonPress(DOM.btnOpenWet);
-      sendBleCommand('W');
-    } else if (event.key === 'd' || event.key === 'D') {
-      event.preventDefault();
-      animateButtonPress(DOM.btnOpenDry);
-      sendBleCommand('D');
-    }
-  });
-
-  DOM.demoToggleWetFull?.addEventListener('click', () => {
-    if (!state.isDemoMode) toggleDemoMode(true);
-
-    state.demoData.wet.full = !state.demoData.wet.full;
-    state.demoData.wet.pct = state.demoData.wet.full ? 98 : 45;
-    state.demoData.wet.cm = state.demoData.wet.full ? 2.5 : 9.5;
-    state.demoData.buzzer = state.demoData.wet.full || state.demoData.dry.full;
-
-    updateDashboard(JSON.parse(JSON.stringify(state.demoData)));
-  });
-
-  DOM.demoToggleDryFull?.addEventListener('click', () => {
-    if (!state.isDemoMode) toggleDemoMode(true);
-
-    state.demoData.dry.full = !state.demoData.dry.full;
-    state.demoData.dry.pct = state.demoData.dry.full ? 95 : 30;
-    state.demoData.dry.cm = state.demoData.dry.full ? 3.0 : 12.0;
-    state.demoData.buzzer = state.demoData.wet.full || state.demoData.dry.full;
-
-    updateDashboard(JSON.parse(JSON.stringify(state.demoData)));
-  });
-
-  DOM.demoSimWetItem?.addEventListener('click', () => {
-    if (!state.isDemoMode) toggleDemoMode(true);
-    simulateDropItem('WET');
-  });
-
-  DOM.demoSimDryItem?.addEventListener('click', () => {
-    if (!state.isDemoMode) toggleDemoMode(true);
-    simulateDropItem('DRY');
-  });
-
-  DOM.demoSimUnknownItem?.addEventListener('click', () => {
-    if (!state.isDemoMode) toggleDemoMode(true);
-    simulateDropItem('UNKNOWN');
-  });
-
-  DOM.demoSimSensorError?.addEventListener('click', () => {
-    if (!state.isDemoMode) toggleDemoMode(true);
-
-    state.demoData.wet.cm = -1;
-    state.demoData.dry.cm = -1;
-
-    updateDashboard(JSON.parse(JSON.stringify(state.demoData)));
-    showToast('Simulated ultrasonic sensor error.', 'warning');
-  });
-}
-
-function animateButtonPress(button) {
-  if (!button) return;
-
-  button.style.transform = 'scale(0.96)';
-
-  setTimeout(() => {
-    button.style.transform = '';
-  }, 120);
-}
-
-// ============================================================================
-// 14. TOAST NOTIFICATIONS AND UTILITIES
-// ============================================================================
-
-function showToast(message, type = 'info') {
-  if (!DOM.toastContainer) {
-    console.log(`[${type.toUpperCase()}] ${message}`);
+  if (!wetFull && !dryFull) {
+    setHidden(DOM.alertBanner, true);
+    state.alertDismissed = false;
     return;
   }
 
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
+  /*
+    Reopen the alert if a compartment has newly become full.
+    previousData must be captured before state.lastData changes.
+  */
 
-  const icons = {
-    success: '<path d="M10 1a9 9 0 100 18 9 9 0 000-18zm-1 13L5 10l1.4-1.4L9 11.2l4.6-4.6L15 8z"/>',
-    error: '<path d="M10 1a9 9 0 100 18 9 9 0 000-18zm4 12l-1.4 1.4L10 11.8l-2.6 2.6L6 13l2.6-3L6 7l1.4-1.4L10 8.2l2.6-2.6L14 7l-2.6 3z"/>',
-    warning: '<path d="M10 1L0 19h20L10 1zm-1 6h2v6H9zm0 8h2v2H9z"/>',
-    info: '<path d="M10 1a9 9 0 100 18 9 9 0 000-18zm1 13H9V9h2zm0-7H9V5h2z"/>'
-  };
+  const previousWetFull = Boolean(
+    previousData && previousData.wet && previousData.wet.full
+  );
 
-  const colors = {
-    success: '#10b981',
-    error: '#ef4444',
-    warning: '#f59e0b',
-    info: '#0ea5e9'
-  };
+  const previousDryFull = Boolean(
+    previousData && previousData.dry && previousData.dry.full
+  );
 
-  toast.innerHTML = `
-    <svg viewBox="0 0 20 20" width="18" height="18" fill="${colors[type] || colors.info}" aria-hidden="true">
-      ${icons[type] || icons.info}
-    </svg>
-    <span>${escapeHtml(message)}</span>`;
+  if (
+    (wetFull && !previousWetFull) ||
+    (dryFull && !previousDryFull)
+  ) {
+    state.alertDismissed = false;
+  }
 
-  DOM.toastContainer.appendChild(toast);
+  if (state.alertDismissed) return;
 
-  setTimeout(() => {
-    toast.style.transition = 'opacity 0.3s, transform 0.3s';
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateY(10px)';
+  let title;
+  let message;
 
-    setTimeout(() => toast.remove(), 300);
-  }, 3800);
+  if (wetFull && dryFull) {
+    title = "OVERFLOW WARNING: Both Bins Are FULL!";
+    message = "Both compartments have reached capacity. Empty both bins.";
+  } else if (wetFull) {
+    title = "OVERFLOW WARNING: Wet Bin is FULL!";
+    message = "Wet compartment capacity reached. Empty it immediately.";
+  } else {
+    title = "OVERFLOW WARNING: Dry Bin is FULL!";
+    message = "Dry compartment capacity reached. Empty it immediately.";
+  }
+
+  setText(DOM.alertTitle, title);
+  setText(DOM.alertMessage, message);
+  setHidden(DOM.alertBanner, false);
 }
 
-function escapeHtml(value) {
-  if (value === null || value === undefined) return '';
+/* ---------------- BUZZER STATUS ---------------- */
 
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+function updateBuzzer(data) {
+  const wetFull = data.wet.valid && data.wet.full;
+  const dryFull = data.dry.valid && data.dry.full;
+
+  const obstruction = Boolean(
+    data.obstruction || data.error
+  );
+
+  const buzzerOn = data.buzzer !== undefined
+    ? Boolean(data.buzzer)
+    : wetFull || dryFull || obstruction;
+
+  if (DOM.buzzer.badge) {
+    DOM.buzzer.badge.classList.toggle("badge-buzzer-on", buzzerOn);
+    DOM.buzzer.badge.classList.toggle("badge-buzzer-off", !buzzerOn);
+  }
+
+  setText(DOM.buzzer.badgeText, buzzerOn ? "ON" : "OFF");
+  setText(
+    DOM.buzzer.headline,
+    buzzerOn ? "Buzzer Active" : "Buzzer Standby"
+  );
+
+  setText(
+    DOM.buzzer.explanation,
+    buzzerOn
+      ? "An overflow, obstruction, or active hardware alarm has been detected."
+      : "Hardware alarm is currently silent. The buzzer activates when an alarm condition is detected."
+  );
+
+  if (DOM.buzzer.circle) {
+    DOM.buzzer.circle.classList.toggle("buzzer-active", buzzerOn);
+  }
+}
+
+/* ---------------- CLASSIFICATION ---------------- */
+
+function updateClassification(data) {
+  const raw = safeNumber(
+    data.moisture ?? data.adc ?? data.moistureRaw,
+    -1
+  );
+
+  setText(
+    DOM.classification.raw,
+    raw >= 0 ? `ADC: ${raw}` : "ADC: --"
+  );
+
+  if (DOM.classification.needle) {
+    DOM.classification.needle.style.left =
+      `${clamp((raw / 4095) * 100, 0, 100)}%`;
+  }
+
+  let classification = "WAITING";
+  let note = "Insert waste item into intake funnel";
+
+  if (raw >= 0) {
+    if (raw > 2500) {
+      classification = "WET";
+      note = "High moisture detected. Wet waste classification.";
+    } else if (raw < 1500) {
+      classification = "DRY";
+      note = "Low moisture detected. Dry waste classification.";
+    } else {
+      classification = "UNKNOWN";
+      note = "Ambiguous moisture level. Check the item or sensor.";
+    }
+  }
+
+  if (data.classification) {
+    const value = String(data.classification).toUpperCase();
+
+    if (["WET", "DRY", "UNKNOWN"].includes(value)) {
+      classification = value;
+    }
+  }
+
+  setText(DOM.classification.classDisplay, classification);
+  setText(DOM.classification.note, note);
+
+  setText(
+    DOM.classification.badgeText,
+    classification === "WAITING"
+      ? "WAITING FOR ITEM"
+      : `${classification} ITEM DETECTED`
+  );
+
+  if (DOM.classification.badge) {
+    DOM.classification.badge.classList.toggle(
+      "badge-neutral",
+      classification === "WAITING"
+    );
+
+    DOM.classification.badge.classList.toggle(
+      "badge-wet",
+      classification === "WET"
+    );
+
+    DOM.classification.badge.classList.toggle(
+      "badge-dry",
+      classification === "DRY"
+    );
+
+    DOM.classification.badge.classList.toggle(
+      "badge-unknown",
+      classification === "UNKNOWN"
+    );
+  }
+}
+
+/* ---------------- CHUTE DOORS ---------------- */
+
+function updateDoor(isWet, isOpen) {
+  const door = isWet ? DOM.wetDoor : DOM.dryDoor;
+  const elements = isWet ? DOM.wet : DOM.dry;
+
+  if (door.lid) {
+    door.lid.classList.toggle("door-open", isOpen);
+  }
+
+  if (door.compartment) {
+    door.compartment.classList.toggle("door-open", isOpen);
+  }
+
+  setText(door.state, isOpen ? "OPEN" : "CLOSED");
+  setText(elements.doorIndicator, isOpen ? "OPEN" : "CLOSED");
+
+  if (elements.doorIndicator) {
+    elements.doorIndicator.classList.toggle("door-pill-open", isOpen);
+    elements.doorIndicator.classList.toggle("door-pill-closed", !isOpen);
+  }
+}
+
+function updateDoors(data) {
+  updateDoor(true, Boolean(data.wetDoorOpen));
+  updateDoor(false, Boolean(data.dryDoorOpen));
+
+  const wetOpen = Boolean(data.wetDoorOpen);
+  const dryOpen = Boolean(data.dryDoorOpen);
+
+  if (wetOpen && dryOpen) {
+    setText(DOM.doorSummary, "Both intake doors are open");
+  } else if (wetOpen) {
+    setText(DOM.doorSummary, "Wet intake door is open");
+  } else if (dryOpen) {
+    setText(DOM.doorSummary, "Dry intake door is open");
+  } else {
+    setText(DOM.doorSummary, "Both intake doors are securely closed");
+  }
+}
+
+/* ---------------- MAIN DASHBOARD UPDATE ---------------- */
+
+function updateDashboard(rawData) {
+  if (!rawData || typeof rawData !== "object") return;
+
+  /*
+    Save the previous data BEFORE replacing state.lastData.
+    This is important for detecting newly-full bins.
+  */
+
+  const previousData = state.lastData;
+
+  const wet = normalizeBin(rawData.wet);
+  const dry = normalizeBin(rawData.dry);
+
+  const data = {
+    ...rawData,
+    wet,
+    dry
+  };
+
+  updateBinDisplay(DOM.wet, wet);
+  updateBinDisplay(DOM.dry, dry);
+
+  updateAlertBanner(wet, dry, previousData);
+  updateBuzzer(data);
+  updateClassification(data);
+  updateDoors(data);
+
+  state.lastData = data;
+
+  updateLastUpdate();
+}
+
+/* ---------------- BLE DATA PARSING ---------------- */
+
+/*
+  Recommended ESP32 JSON format:
+
+  {
+    "wet": {
+      "distance": 12.5,
+      "percent": 30,
+      "full": false
+    },
+    "dry": {
+      "distance": 5,
+      "percent": 90,
+      "full": true
+    },
+    "moisture": 1200,
+    "buzzer": true,
+    "wetDoorOpen": false,
+    "dryDoorOpen": false
+  }
+
+  The parser also accepts simple key/value text lines.
+*/
+
+function parseTelemetry(message) {
+  const textMessage = message.trim();
+
+  if (!textMessage) return null;
+
+  try {
+    const json = JSON.parse(textMessage);
+
+    if (json && typeof json === "object") {
+      return json;
+    }
+  } catch (_) {
+    // Not JSON. Try key/value parsing below.
+  }
+
+  const result = {};
+  const values = {};
+
+  textMessage.split(/[,\n;]+/).forEach((part) => {
+    const separator = part.indexOf("=");
+
+    if (separator === -1) return;
+
+    const key = part.slice(0, separator).trim().toLowerCase();
+    const value = part.slice(separator + 1).trim();
+
+    if (key) values[key] = value;
+  });
+
+  function getNumber(...keys) {
+    for (const key of keys) {
+      if (values[key] !== undefined) {
+        const number = Number(values[key]);
+
+        if (Number.isFinite(number)) return number;
+      }
+    }
+
+    return undefined;
+  }
+
+  function getBoolean(...keys) {
+    for (const key of keys) {
+      if (values[key] !== undefined) {
+        return ["1", "true", "on", "yes", "open", "full"].includes(
+          values[key].toLowerCase()
+        );
+      }
+    }
+
+    return undefined;
+  }
+
+  const wetDistance = getNumber("wetdistance", "wet_distance", "wetcm", "wet");
+  const dryDistance = getNumber("drydistance", "dry_distance", "drycm", "dry");
+
+  if (wetDistance !== undefined) {
+    result.wet = { distance: wetDistance };
+  }
+
+  if (dryDistance !== undefined) {
+    result.dry = { distance: dryDistance };
+  }
+
+  const wetPercent = getNumber("wetpercent", "wet_percent");
+  const dryPercent = getNumber("drypercent", "dry_percent");
+
+  if (wetPercent !== undefined) {
+    result.wet = { ...(result.wet || {}), percent: wetPercent };
+  }
+
+  if (dryPercent !== undefined) {
+    result.dry = { ...(result.dry || {}), percent: dryPercent };
+  }
+
+  const wetFull = getBoolean("wetfull", "wet_full");
+  const dryFull = getBoolean("dryfull", "dry_full");
+
+  if (wetFull !== undefined) {
+    result.wet = { ...(result.wet || {}), full: wetFull };
+  }
+
+  if (dryFull !== undefined) {
+    result.dry = { ...(result.dry || {}), full: dryFull };
+  }
+
+  const moisture = getNumber("moisture", "adc", "moistureraw");
+
+  if (moisture !== undefined) {
+    result.moisture = moisture;
+  }
+
+  const buzzer = getBoolean("buzzer", "alarm");
+
+  if (buzzer !== undefined) {
+    result.buzzer = buzzer;
+  }
+
+  const wetDoorOpen = getBoolean("wetdooropen", "wet_door_open");
+  const dryDoorOpen = getBoolean("drydooropen", "dry_door_open");
+
+  if (wetDoorOpen !== undefined) {
+    result.wetDoorOpen = wetDoorOpen;
+  }
+
+  if (dryDoorOpen !== undefined) {
+    result.dryDoorOpen = dryDoorOpen;
+  }
+
+  return Object.keys(result).length ? result : null;
+}
+
+function handleBLENotification(event) {
+  const value = event.target.value;
+
+  const message = new TextDecoder().decode(value);
+  const data = parseTelemetry(message);
+
+  if (data) {
+    updateDashboard(data);
+  } else {
+    console.warn("Could not parse ESP32 telemetry:", message);
+  }
+}
+
+/* ---------------- BLUETOOTH CONNECTION ---------------- */
+
+function isBluetoothSupported() {
+  return Boolean(
+    navigator.bluetooth &&
+    typeof navigator.bluetooth.requestDevice === "function"
+  );
+}
+
+async function connectBLE() {
+  if (!isBluetoothSupported()) {
+    setHidden(DOM.browserWarning, false);
+    showToast(
+      "Web Bluetooth is unavailable. Use Chrome or Edge on a supported device.",
+      "error"
+    );
+    return;
+  }
+
+  try {
+    state.device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [BLE_SERVICE_UUID] }],
+      optionalServices: [BLE_SERVICE_UUID]
+    });
+
+    state.device.addEventListener(
+      "gattserverdisconnected",
+      handleBLEDisconnect
+    );
+
+    updateConnectionStatus(false, "Connecting...");
+
+    state.server = await state.device.gatt.connect();
+
+    state.service = await state.server.getPrimaryService(
+      BLE_SERVICE_UUID
+    );
+
+    state.rxCharacteristic = await state.service.getCharacteristic(
+      BLE_RX_UUID
+    );
+
+    state.txCharacteristic = await state.service.getCharacteristic(
+      BLE_TX_UUID
+    );
+
+    await state.txCharacteristic.startNotifications();
+
+    state.txCharacteristic.addEventListener(
+      "characteristicvaluechanged",
+      handleBLENotification
+    );
+
+    updateConnectionStatus(true, "Connected");
+    addHistory(`Connected to ${state.device.name || "ESP32 SmartBin"}`, "success");
+    showToast("Connected to SmartBin successfully.", "success");
+
+  } catch (error) {
+    console.error("BLE connection failed:", error);
+
+    updateConnectionStatus(false);
+
+    if (error.name !== "NotFoundError") {
+      showToast(`BLE connection failed: ${error.message}`, "error");
+      addHistory(`BLE connection failed: ${error.message}`, "error");
+    }
+  }
+}
+
+function handleBLEDisconnect() {
+  state.connected = false;
+
+  if (state.txCharacteristic) {
+    state.txCharacteristic.removeEventListener(
+      "characteristicvaluechanged",
+      handleBLENotification
+    );
+  }
+
+  state.server = null;
+  state.service = null;
+  state.txCharacteristic = null;
+  state.rxCharacteristic = null;
+
+  updateConnectionStatus(false);
+
+  addHistory("SmartBin disconnected.", "warning");
+  showToast("SmartBin disconnected.", "warning");
+}
+
+async function disconnectBLE() {
+  try {
+    if (state.device && state.device.gatt.connected) {
+      state.device.gatt.disconnect();
+    } else {
+      handleBLEDisconnect();
+    }
+  } catch (error) {
+    console.error("Disconnect error:", error);
+    showToast("Could not disconnect cleanly.", "error");
+  }
+}
+
+async function sendBLECommand(command) {
+  if (state.demoMode) {
+    handleDemoCommand(command);
+    return;
+  }
+
+  if (
+    !state.connected ||
+    !state.rxCharacteristic
+  ) {
+    showToast("Connect to the ESP32 first, or activate Demo Mode.", "warning");
+    setText(DOM.commandFeedback, "Not connected. Command was not sent.");
+    return;
+  }
+
+  try {
+    const bytes = new TextEncoder().encode(command);
+
+    if (typeof state.rxCharacteristic.writeValueWithResponse === "function") {
+      await state.rxCharacteristic.writeValueWithResponse(bytes);
+    } else {
+      await state.rxCharacteristic.writeValue(bytes);
+    }
+
+    const description = command === "W"
+      ? "Wet door command sent to ESP32."
+      : "Dry door command sent to ESP32.";
+
+    setText(DOM.commandFeedback, description);
+    addHistory(description, "success");
+    showToast(description, "success");
+
+  } catch (error) {
+    console.error("BLE command failed:", error);
+
+    setText(DOM.commandFeedback, `Command failed: ${error.message}`);
+    showToast("Failed to send command to ESP32.", "error");
+  }
+}
+
+/* ---------------- DEMO MODE ---------------- */
+
+function createDemoData() {
+  const wetDistance = state.demo.sensorError
+    ? -1
+    : state.demo.wetFull
+      ? 1
+      : state.demo.wetDistance;
+
+  const dryDistance = state.demo.sensorError
+    ? -1
+    : state.demo.dryFull
+      ? 1
+      : state.demo.dryDistance;
+
+  return {
+    wet: {
+      distance: wetDistance,
+      percent: state.demo.wetFull
+        ? 100
+        : state.demo.sensorError
+          ? 0
+          : clamp(
+              Math.round(((BIN_HEIGHT_CM - wetDistance) / BIN_HEIGHT_CM) * 100),
+              0,
+              100
+            ),
+      full: state.demo.wetFull
+    },
+
+    dry: {
+      distance: dryDistance,
+      percent: state.demo.dryFull
+        ? 100
+        : state.demo.sensorError
+          ? 0
+          : clamp(
+              Math.round(((BIN_HEIGHT_CM - dryDistance) / BIN_HEIGHT_CM) * 100),
+              0,
+              100
+            ),
+      full: state.demo.dryFull
+    },
+
+    moisture: state.demo.moisture,
+
+    buzzer:
+      state.demo.wetFull ||
+      state.demo.dryFull ||
+      state.demo.sensorError,
+
+    wetDoorOpen: state.demo.wetDoorOpen,
+    dryDoorOpen: state.demo.dryDoorOpen
+  };
+}
+
+function startDemoMode() {
+  state.demoMode = true;
+
+  if (state.device && state.device.gatt.connected) {
+    state.device.gatt.disconnect();
+  }
+
+  updateConnectionStatus(false, "Demo Mode");
+  setText(DOM.demoBadge, "ON");
+
+  if (DOM.demoBtn) {
+    DOM.demoBtn.setAttribute("aria-pressed", "true");
+    DOM.demoBtn.classList.add("demo-active");
+  }
+
+  setHidden(DOM.demoControlBar, false);
+  setHidden(DOM.browserWarning, true);
+
+  updateDashboard(createDemoData());
+
+  state.demoTimer = window.setInterval(() => {
+    if (!state.demo.sensorError) {
+      if (!state.demo.wetFull) {
+        state.demo.wetDistance = clamp(
+          state.demo.wetDistance + (Math.random() - 0.5) * 0.6,
+          1,
+          BIN_HEIGHT_CM
+        );
+      }
+
+      if (!state.demo.dryFull) {
+        state.demo.dryDistance = clamp(
+          state.demo.dryDistance + (Math.random() - 0.5) * 0.6,
+          1,
+          BIN_HEIGHT_CM
+        );
+      }
+    }
+
+    updateDashboard(createDemoData());
+  }, 2000);
+
+  addHistory("Demo Mode activated.", "success");
+  showToast("Demo Mode activated. Sensor data is simulated.", "success");
+}
+
+function stopDemoMode() {
+  state.demoMode = false;
+
+  if (state.demoTimer) {
+    window.clearInterval(state.demoTimer);
+    state.demoTimer = null;
+  }
+
+  setText(DOM.demoBadge, "OFF");
+
+  if (DOM.demoBtn) {
+    DOM.demoBtn.setAttribute("aria-pressed", "false");
+    DOM.demoBtn.classList.remove("demo-active");
+  }
+
+  setHidden(DOM.demoControlBar, true);
+
+  updateConnectionStatus(state.connected);
+
+  addHistory("Demo Mode deactivated.", "info");
+  showToast("Demo Mode deactivated.", "info");
+}
+
+function toggleDemoMode() {
+  if (state.demoMode) {
+    stopDemoMode();
+  } else {
+    startDemoMode();
+  }
+}
+
+function handleDemoCommand(command) {
+  if (command === "W") {
+    state.demo.wetDoorOpen = !state.demo.wetDoorOpen;
+
+    if (state.demo.wetDoorOpen) {
+      state.demo.dryDoorOpen = false;
+    }
+  }
+
+  if (command === "D") {
+    state.demo.dryDoorOpen = !state.demo.dryDoorOpen;
+
+    if (state.demo.dryDoorOpen) {
+      state.demo.wetDoorOpen = false;
+    }
+  }
+
+  updateDashboard(createDemoData());
+
+  const message = command === "W"
+    ? `Demo: Wet door ${state.demo.wetDoorOpen ? "opened" : "closed"}.`
+    : `Demo: Dry door ${state.demo.dryDoorOpen ? "opened" : "closed"}.`;
+
+  setText(DOM.commandFeedback, message);
+  addHistory(message, "info");
+  showToast(message, "success");
+}
+
+/* ---------------- DEMO SIMULATION BUTTONS ---------------- */
+
+function toggleWetFull() {
+  state.demo.wetFull = !state.demo.wetFull;
+
+  if (state.demo.wetFull) {
+    state.demo.wetDistance = 1;
+  } else {
+    state.demo.wetDistance = 15;
+  }
+
+  state.demo.sensorError = false;
+
+  updateDashboard(createDemoData());
+
+  addHistory(
+    `Demo: Wet bin ${state.demo.wetFull ? "is FULL" : "is no longer full"}.`,
+    state.demo.wetFull ? "warning" : "success"
+  );
+}
+
+function toggleDryFull() {
+  state.demo.dryFull = !state.demo.dryFull;
+
+  if (state.demo.dryFull) {
+    state.demo.dryDistance = 1;
+  } else {
+    state.demo.dryDistance = 15;
+  }
+
+  state.demo.sensorError = false;
+
+  updateDashboard(createDemoData());
+
+  addHistory(
+    `Demo: Dry bin ${state.demo.dryFull ? "is FULL" : "is no longer full"}.`,
+    state.demo.dryFull ? "warning" : "success"
+  );
+}
+
+function simulateWetItem() {
+  state.demo.moisture = 3200;
+  updateDashboard(createDemoData());
+
+  addHistory("Demo: Wet item detected.", "info");
+}
+
+function simulateDryItem() {
+  state.demo.moisture = 900;
+  updateDashboard(createDemoData());
+
+  addHistory("Demo: Dry item detected.", "info");
+}
+
+function simulateUnknownItem() {
+  state.demo.moisture = 2000;
+  updateDashboard(createDemoData());
+
+  addHistory("Demo: Ambiguous item detected.", "warning");
+}
+
+function simulateSensorError() {
+  state.demo.sensorError = !state.demo.sensorError;
+  updateDashboard(createDemoData());
+
+  addHistory(
+    `Demo: Sensor error ${state.demo.sensorError ? "enabled" : "disabled"}.`,
+    state.demo.sensorError ? "error" : "success"
+  );
+}
+
+/* ---------------- THEME ---------------- */
+
+function applyTheme(theme) {
+  const selectedTheme = theme === "light" ? "light" : "dark";
+
+  document.documentElement.setAttribute("data-theme", selectedTheme);
+
+  setHidden(DOM.moonIcon, selectedTheme === "light");
+  setHidden(DOM.sunIcon, selectedTheme === "dark");
+
+  try {
+    localStorage.setItem(THEME_KEY, selectedTheme);
+  } catch (error) {
+    console.warn("Could not save theme:", error);
+  }
+}
+
+function initializeTheme() {
+  let theme = "dark";
+
+  try {
+    theme = localStorage.getItem(THEME_KEY) || "dark";
+  } catch (error) {
+    console.warn("Could not read saved theme:", error);
+  }
+
+  applyTheme(theme);
+}
+
+function toggleTheme() {
+  const currentTheme =
+    document.documentElement.getAttribute("data-theme") || "dark";
+
+  applyTheme(currentTheme === "dark" ? "light" : "dark");
+}
+
+/* ---------------- ALERT DISMISS ---------------- */
+
+function dismissAlert() {
+  state.alertDismissed = true;
+  setHidden(DOM.alertBanner, true);
+}
+
+/* ---------------- EVENT LISTENERS ---------------- */
+
+function bindEvents() {
+  DOM.connectBtn?.addEventListener("click", () => {
+    if (state.connected) {
+      disconnectBLE();
+    } else {
+      connectBLE();
+    }
+  });
+
+  DOM.demoBtn?.addEventListener("click", toggleDemoMode);
+
+  DOM.enableDemoFromWarning?.addEventListener("click", () => {
+    if (!state.demoMode) startDemoMode();
+  });
+
+  DOM.themeBtn?.addEventListener("click", toggleTheme);
+
+  DOM.alertDismiss?.addEventListener("click", dismissAlert);
+
+  DOM.openWetBtn?.addEventListener("click", () => {
+    sendBLECommand("W");
+  });
+
+  DOM.openDryBtn?.addEventListener("click", () => {
+    sendBLECommand("D");
+  });
+
+  DOM.clearHistoryBtn?.addEventListener("click", clearHistory);
+
+  $("demo-toggle-wet-full")?.addEventListener("click", () => {
+    if (state.demoMode) toggleWetFull();
+  });
+
+  $("demo-toggle-dry-full")?.addEventListener("click", () => {
+    if (state.demoMode) toggleDryFull();
+  });
+
+  $("demo-sim-wet-item")?.addEventListener("click", () => {
+    if (state.demoMode) simulateWetItem();
+  });
+
+  $("demo-sim-dry-item")?.addEventListener("click", () => {
+    if (state.demoMode) simulateDryItem();
+  });
+
+  $("demo-sim-unknown-item")?.addEventListener("click", () => {
+    if (state.demoMode) simulateUnknownItem();
+  });
+
+  $("demo-sim-sensor-error")?.addEventListener("click", () => {
+    if (state.demoMode) simulateSensorError();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    const target = event.target;
+
+    if (
+      target &&
+      (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      )
+    ) {
+      return;
+    }
+
+    if (event.key.toLowerCase() === "w") {
+      sendBLECommand("W");
+    }
+
+    if (event.key.toLowerCase() === "d") {
+      sendBLECommand("D");
+    }
+  });
+}
+
+/* ---------------- BROWSER COMPATIBILITY ---------------- */
+
+function checkBrowserCompatibility() {
+  if (!isBluetoothSupported()) {
+    setHidden(DOM.browserWarning, false);
+  } else {
+    setHidden(DOM.browserWarning, true);
+  }
+}
+
+/* ---------------- INITIALIZATION ---------------- */
+
+function initializeApp() {
+  initializeTheme();
+  loadHistory();
+  bindEvents();
+  checkBrowserCompatibility();
+
+  updateConnectionStatus(false);
+
+  updateDashboard({
+    wet: { distance: -1 },
+    dry: { distance: -1 },
+    moisture: -1,
+    buzzer: false,
+    wetDoorOpen: false,
+    dryDoorOpen: false
+  });
+
+  addHistory("Smart Waste Monitor initialized.", "info");
+
+  console.log("Smart Waste Monitor initialized.");
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeApp);
+} else {
+  initializeApp();
 }
