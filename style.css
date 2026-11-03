@@ -1757,3 +1757,49 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- SPLASH SCREEN ADDED ---- */
+
+#splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: #07111f;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.6s ease, visibility 0.6s ease;
+}
+
+#splash-screen img {
+  width: min(70vw, 70vh, 420px);
+  height: auto;
+  object-fit: contain;
+}
+
+#splash-screen h1 {
+  margin-top: 24px;
+  padding: 0 20px;
+  color: #ffffff;
+  font-family: 'Poppins', sans-serif;
+  font-size: clamp(1.5rem, 4vw, 2.8rem);
+  font-weight: 800;
+  text-align: center;
+}
+
+#splash-screen p {
+  margin-top: 10px;
+  color: #94a3b8;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+#splash-screen.splash-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
