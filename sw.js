@@ -1,5 +1,5 @@
 // Smart Waste Monitor - Service Worker for PWA Offline Caching
-const CACHE_NAME = 'smartbin-cache-v1';
+const CACHE_NAME = 'smartbin-cache-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -11,24 +11,25 @@ const ASSETS_TO_CACHE = [
   './icons/icon-512.png'
 ];
 
-// Install Event: pre-cache application shell
+// Install Event: pre-cache application shell and activate immediately
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[ServiceWorker] Pre-caching offline assets');
+      console.log('[ServiceWorker] Pre-caching offline assets under', CACHE_NAME);
       return cache.addAll(ASSETS_TO_CACHE);
-    }).then(() => self.skipWaiting())
+    })
   );
 });
 
-// Activate Event: remove stale caches
+// Activate Event: remove stale caches and take control of all open clients
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keyList) => {
       return Promise.all(
         keyList.map((key) => {
           if (key !== CACHE_NAME) {
-            console.log('[ServiceWorker] Removing old cache:', key);
+            console.log('[ServiceWorker] Removing stale cache:', key);
             return caches.delete(key);
           }
         })
